@@ -39,6 +39,8 @@ ORDER_BUTTON_SELECTORS = [
     'button:has-text("立即预约")',
 ]
 DIALOG_CONFIRM_SELECTORS = [
+    'text=确认预约',
+    'button:has-text("确认预约")',
     'text=确定',
     'button:has-text("确定")',
     ".layui-m-layerbtn span:last-child",
@@ -190,13 +192,26 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
     return False
 
 
-async def _confirm_dialog(page, selectors: Iterable[str]) -> None:
+async def _confirm_dialog(
+    page,
+    selectors: Iterable[str],
+    fallback_selectors: Optional[Iterable[str]] = None,
+    timeout: int = 3000,
+) -> bool:
     for sel in selectors:
         try:
-            await page.click(sel, timeout=3000)
-            break
+            await page.click(sel, timeout=timeout)
+            return True
         except Exception:
             continue
+
+    if fallback_selectors:
+        print("[W] 弹窗确认按钮未匹配，尝试使用下单按钮选择器作为回退。")
+        if await _click_first_selector(page, fallback_selectors, timeout=timeout):
+            return True
+
+    print("[W] 未执行弹窗确认步骤（未找到可点击的确认按钮）。")
+    return False
 
 
 SelectorInput = Union[Iterable[str], str, None]
@@ -224,15 +239,6 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
     else:
         print("[E] 未配置有效的按钮选择器。")
     return False
-
-
-async def _confirm_dialog(page, selectors: Iterable[str]) -> None:
-    for sel in selectors:
-        try:
-            await page.click(sel, timeout=3000)
-            break
-        except Exception:
-            continue
 
 
 async def add_cookies(context, raw_cookie: str):
@@ -308,7 +314,11 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                 ) as resp_info:
                     if not await _click_first_selector(page, submit_selectors, timeout=10000):
                         raise RuntimeError("button selectors not clickable")
-                    await _confirm_dialog(page, _as_selector_list(DIALOG_CONFIRM_SELECTORS))
+                    await _confirm_dialog(
+                        page,
+                        _as_selector_list(DIALOG_CONFIRM_SELECTORS),
+                        fallback_selectors=submit_selectors,
+                    )
 
                 resp = await resp_info.value
                 ctype = resp.headers.get("content-type", "")
