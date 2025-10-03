@@ -13,7 +13,7 @@ import argparse
 import asyncio
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Iterable, Union
 
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
@@ -33,13 +33,22 @@ MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
 RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed422776; sass_gym_shop_owner=8d5c1b09e9bcdb787f2b00cd3a730d49b1f1142fa0a7ae9f7f6ac4e329a3a985a%3A2%3A%7Bi%3A0%3Bs%3A19%3A%22sass_gym_shop_owner%22%3Bi%3A1%3Bs%3A8%3A%22e74abd6e%22%3B%7D; Hm_lvt_f4a079b93f8455a44b27c20205cbb8b3=1759507757; HMACCOUNT=DDF29FB8313FFB52; rsource=1320acdbe79dceaac8a47a5bb72c36af3f9a292693e3bf536e960a7c67631e56a%3A2%3A%7Bi%3A0%3Bs%3A7%3A%22rsource%22%3Bi%3A1%3Bs%3A7%3A%22styd.cn%22%3B%7D; PHPSESSID=95hglj7jri5edbittpub3ol2o0; sass_gym_wap=d2500380f34de647cdbee6ac749a9897275e10ee31db81dcb912a3fb28bbc58fa%3A2%3A%7Bi%3A0%3Bs%3A12%3A%22sass_gym_wap%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; sass_gym_base=d647e2f758cbb4b43c34e53b57eefc2f55d24ae78e5ab30df0dc8043d5a427cca%3A2%3A%7Bi%3A0%3Bs%3A13%3A%22sass_gym_base%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; club_gym_fav_shop_id=dc8d145bd76114fc5213fa9e22c6ac58f7879d80a53a57872cb0d2fd4ef0dabca%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22club_gym_fav_shop_id%22%3Bi%3A1%3Bi%3A612773420%3B%7D; saas_gym_buy_referer=3909ac13f0218caf1d861b024048b94123b89f38fba14ca389d1735ed62f8528a%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22saas_gym_buy_referer%22%3Bi%3A1%3Bs%3A55%3A%22https%3A%2F%2Fwww.styd.cn%2Fm%2Fe74abd6e%2Fcourse%2Forder%3Fid%3D89007443%22%3B%7D; Hm_lpvt_f4a079b93f8455a44b27c20205cbb8b3=1759509539"""
 
 # 订单页上的按钮与弹窗
-ORDER_BUTTON_SELECTOR = "#do_order"
-DIALOG_CONFIRM_TEXT = "确定"  # 若不是“确定”，改成实际文案
-DIALOG_CONFIRM_FALLBACK = ".layui-m-layerbtn span:last-child"
+ORDER_BUTTON_SELECTORS = [
+    "#do_order",
+    'button:has-text("确认预约")',
+    'button:has-text("立即预约")',
+]
+DIALOG_CONFIRM_SELECTORS = [
+    'text=确定',
+    'button:has-text("确定")',
+    ".layui-m-layerbtn span:last-child",
+]
 
 # 选课策略
-PREFERRED_KEYWORDS = ["健身中心（午）", "游泳馆（午）", "游泳馆"]
+PREFERRED_KEYWORDS = ["健身中心（午）"]
 PREFERRED_TIME_RANGES = ["12:30 - 14:00", "19:00 - 21:00"]
+# 当设置了关键词时，是否必须命中其一；若无匹配可回退到全部课程
+REQUIRE_KEYWORD_MATCH = True
 
 # 拥挤限制
 MAX_OCCUPANCY_RATIO = 0.98
@@ -129,20 +138,65 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
     if not pool:
         return None
 
+    matched_pool = pool
+    if PREFERRED_KEYWORDS and REQUIRE_KEYWORD_MATCH:
+        matched_pool = [
+            c for c in pool if any(kw in c.title for kw in PREFERRED_KEYWORDS)
+        ]
+        if not matched_pool:
+            print("[!] 未找到匹配关键字的课程，将回退至全部可预约课程。")
+            matched_pool = pool
+
     def score(c: Course) -> Tuple[int, int, float]:
         kw_rank = min((i for i, kw in enumerate(PREFERRED_KEYWORDS) if kw in c.title), default=999)
         t_rank = min((i for i, tr in enumerate(PREFERRED_TIME_RANGES) if tr in c.time_range), default=999)
         ratio = (c.taken / c.total) if c.total else 1.0
         return (kw_rank, t_rank, ratio)
 
-    pool.sort(key=score)
+    matched_pool.sort(key=score)
 
-    for c in pool:
+    for c in matched_pool:
         ratio_ok = (c.taken / c.total) < MAX_OCCUPANCY_RATIO if c.total else True
         abs_ok = (c.taken <= MAX_ABSOLUTE_TAKEN) if (MAX_ABSOLUTE_TAKEN is not None) else True
         if ratio_ok and abs_ok:
             return c
-    return pool[0] if pool else None
+    return matched_pool[0] if matched_pool else None
+
+
+SelectorInput = Union[Iterable[str], str, None]
+
+
+def _as_selector_list(selectors: SelectorInput) -> List[str]:
+    if not selectors:
+        return []
+    if isinstance(selectors, str):
+        return [selectors]
+    return [s for s in selectors if s]
+
+
+async def _click_first_selector(page, selectors: Iterable[str], timeout: int) -> bool:
+    last_err: Optional[Exception] = None
+    for sel in selectors:
+        try:
+            await page.wait_for_selector(sel, timeout=timeout)
+            await page.click(sel)
+            return True
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    if last_err:
+        print(f"[E] 未能点击任何按钮选择器：{selectors}。最后错误：{last_err}")
+    else:
+        print("[E] 未配置有效的按钮选择器。")
+    return False
+
+
+async def _confirm_dialog(page, selectors: Iterable[str]) -> None:
+    for sel in selectors:
+        try:
+            await page.click(sel, timeout=3000)
+            break
+        except Exception:
+            continue
 
 
 async def add_cookies(context, raw_cookie: str):
@@ -186,76 +240,73 @@ async def fetch_search(context, date: str, shop_id: str, tp: str = "1") -> Dict[
 async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = False) -> bool:
     async with async_playwright() as p:
         browser = await p.webkit.launch(headless=not show)
-        context = await browser.new_context(
-            user_agent=MOBILE_UA,
-            viewport={"width": 390, "height": 844},
-        )
-        await add_cookies(context, raw_cookie)
-        page = await context.new_page()
+        try:
+            context = await browser.new_context(
+                user_agent=MOBILE_UA,
+                viewport={"width": 390, "height": 844},
+            )
+            await add_cookies(context, raw_cookie)
+            page = await context.new_page()
 
-        order_url = ORDER_URL_TMPL.format(cid=course_id)
-        await page.goto(order_url, wait_until="domcontentloaded", timeout=20000)
+            order_url = ORDER_URL_TMPL.format(cid=course_id)
+            await page.goto(order_url, wait_until="domcontentloaded", timeout=20000)
 
-        html = await page.content()
-        if any(x in html for x in ["登录", "请先登录", "手机号"]):
-            print("[E] Cookie 失效或未登录。")
-            await browser.close()
-            return False
+            html = await page.content()
+            if any(x in html for x in ["登录", "请先登录", "手机号"]):
+                print("[E] Cookie 失效或未登录。")
+                return False
 
-            await page.wait_for_selector(ORDER_BUTTON_SELECTOR, timeout=10000)
+            ok = False
+            submit_selectors = _as_selector_list(ORDER_BUTTON_SELECTORS)
+            if not submit_selectors:
+                print("[E] 未配置下单按钮选择器，请设置 ORDER_BUTTON_SELECTORS。")
+                return False
 
-            async with page.expect_response(
-                    lambda r: (r.request.method == "POST"
-                            and f"/m/{SPACE}/course/order_confirm" in r.url),
-                    timeout=15000
-            ) as resp_info:
-            # 触发 XHR 的所有点击动作都放在 with 里面
-                await page.click(ORDER_BUTTON_SELECTOR)
+            try:
+                async with page.expect_response(
+                    lambda r: (
+                        r.request.method == "POST"
+                        and f"/m/{SPACE}/course/order_confirm" in r.url
+                    ),
+                    timeout=15000,
+                ) as resp_info:
+                    if not await _click_first_selector(page, submit_selectors, timeout=10000):
+                        raise RuntimeError("button selectors not clickable")
+                    await _confirm_dialog(page, _as_selector_list(DIALOG_CONFIRM_SELECTORS))
 
-            # 弹窗确认（两路兜底）
-                confirmed = False
-                try:
-                    await page.wait_for_selector(f"text={DIALOG_CONFIRM_TEXT}", timeout=4000)
-                    await page.click(f"text={DIALOG_CONFIRM_TEXT}")
-                    confirmed = True
-                except:
-                    pass
-                if not confirmed:
+                resp = await resp_info.value
+                ctype = resp.headers.get("content-type", "")
+                if "application/json" in ctype:
+                    data = await resp.json()
+                else:
+                    txt = await resp.text()
                     try:
-                        await page.click(DIALOG_CONFIRM_FALLBACK, timeout=3000)
-                        confirmed = True
-                    except:
-                        pass
+                        data = json.loads(txt)
+                    except Exception:
+                        data = {"raw": txt}
+                if isinstance(data, dict):
+                    code = str(data.get("code", "")).strip()
+                    msg = str(data.get("msg", ""))
+                    if (
+                        code in ("0", "1", "200")
+                        or data.get("success") is True
+                        or "成功" in msg
+                    ):
+                        ok = True
+            except Exception as e:
+                print("[W] 响应解析异常：", e)
 
-            resp = await resp_info.value
-
-            ctype = resp.headers.get("content-type", "")
-            if "application/json" in ctype:
-                data = await resp.json()
-            else:
-                txt = await resp.text()
-                try:
-                    data = json.loads(txt)
-                except:
-                    data = {"raw": txt}
-            if isinstance(data, dict):
-                code = str(data.get("code", "")).strip()
-                msg = str(data.get("msg", ""))
-                if code in ("0", "1", "200") or data.get("success") is True or "成功" in msg:
+            if not ok:
+                await asyncio.sleep(0.8)
+                if re.search(r"/order/detail|/mine/order|success", page.url):
                     ok = True
-        except Exception as e:
-            print("[W] 响应解析异常：", e)
 
-        if not ok:
-            await asyncio.sleep(0.8)
-            if re.search(r"/order/detail|/mine/order|success", page.url):
-                ok = True
+            if show:
+                await page.wait_for_timeout(1500)
 
-        if show:
-            await page.wait_for_timeout(1500)
-
-        await browser.close()
-        return ok
+            return ok
+        finally:
+            await browser.close()
 
 
 async def main_async():
@@ -332,7 +383,7 @@ async def main_async():
         print("[!] 预约未成功。可能原因：")
         print("  - Cookie 失效/未登录；")
         print("  - 需要先选择附加项（人数/协议/场地）或页面改版；")
-        print("  - 弹窗文本不是“确定”，请修改 DIALOG_CONFIRM_TEXT；")
+        print("  - 弹窗按钮选择器不匹配（请调整 DIALOG_CONFIRM_SELECTORS）；")
         print("  - 名额瞬间抢空/风控/验证码。")
 
 

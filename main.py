@@ -13,7 +13,7 @@ import json
 import random
 import argparse
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Iterable, Union
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,15 +28,24 @@ MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
 # 你捕获到的 Cookie（建议直接粘贴你浏览器里“请求标头”的 Cookie 字符串）
 RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed422776; sass_gym_shop_owner=8d5c1b09e9bcdb787f2b00cd3a730d49b1f1142fa0a7ae9f7f6ac4e329a3a985a%3A2%3A%7Bi%3A0%3Bs%3A19%3A%22sass_gym_shop_owner%22%3Bi%3A1%3Bs%3A8%3A%22e74abd6e%22%3B%7D; Hm_lvt_f4a079b93f8455a44b27c20205cbb8b3=1759507757; HMACCOUNT=DDF29FB8313FFB52; rsource=1320acdbe79dceaac8a47a5bb72c36af3f9a292693e3bf536e960a7c67631e56a%3A2%3A%7Bi%3A0%3Bs%3A7%3A%22rsource%22%3Bi%3A1%3Bs%3A7%3A%22styd.cn%22%3B%7D; PHPSESSID=95hglj7jri5edbittpub3ol2o0; sass_gym_wap=d2500380f34de647cdbee6ac749a9897275e10ee31db81dcb912a3fb28bbc58fa%3A2%3A%7Bi%3A0%3Bs%3A12%3A%22sass_gym_wap%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; sass_gym_base=d647e2f758cbb4b43c34e53b57eefc2f55d24ae78e5ab30df0dc8043d5a427cca%3A2%3A%7Bi%3A0%3Bs%3A13%3A%22sass_gym_base%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; club_gym_fav_shop_id=dc8d145bd76114fc5213fa9e22c6ac58f7879d80a53a57872cb0d2fd4ef0dabca%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22club_gym_fav_shop_id%22%3Bi%3A1%3Bi%3A612773420%3B%7D; saas_gym_buy_referer=3909ac13f0218caf1d861b024048b94123b89f38fba14ca389d1735ed62f8528a%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22saas_gym_buy_referer%22%3Bi%3A1%3Bs%3A55%3A%22https%3A%2F%2Fwww.styd.cn%2Fm%2Fe74abd6e%2Fcourse%2Forder%3Fid%3D89007443%22%3B%7D; Hm_lpvt_f4a079b93f8455a44b27c20205cbb8b3=1759509539"""
 
-# 订单页里“点击预约/提交”的按钮选择器（**需要你实际看一次订单页确定**）
-# 例如：button:text("立即预约") 或者 'a#submitBtn' 或 '.confirm-btn'
-ORDER_SUBMIT_SELECTOR = 'button:has-text("确认预约")'  # 占位：请按实际页面改
+# 订单页里“点击预约/提交”的按钮选择器（从前到后依次尝试，按页面实际调整）
+ORDER_SUBMIT_SELECTORS = [
+    '#do_order',
+    'button:has-text("确认预约")',
+    'button:has-text("立即预约")',
+]
 
-# 如果存在确认弹窗（如“确认预约？”），可填写第二次点击
-ORDER_DIALOG_CONFIRM_SELECTOR = 'button:has-text("确定")'  # 没有可留空
+# 如果存在确认弹窗（如“确认预约？”），依次尝试点击这些按钮
+ORDER_DIALOG_CONFIRM_SELECTORS = [
+    'text=确定',
+    'button:has-text("确定")',
+    '.layui-m-layerbtn span:last-child',
+]
 
 # 选课策略：优先匹配的关键词（按优先级从高到低）
 PREFERRED_KEYWORDS = ["健身中心（午）"]
+# 当设置了关键词时，是否必须匹配其一才视为候选；否则回退到所有可预约课程
+REQUIRE_KEYWORD_MATCH = True
 
 # 时间窗口过滤（字符串包含即可，留空不过滤）
 PREFERRED_TIME_RANGES = []
@@ -154,6 +163,15 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
     if not pool:
         return None
 
+    matched_pool = pool
+    if PREFERRED_KEYWORDS and REQUIRE_KEYWORD_MATCH:
+        matched_pool = [
+            c for c in pool if any(kw in c.title for kw in PREFERRED_KEYWORDS)
+        ]
+        if not matched_pool:
+            print("[!] 未找到匹配关键字的课程，将回退至全部可预约课程。")
+            matched_pool = pool
+
     # 时间与关键词优先
     def score(c: Course) -> Tuple[int, int, float]:
         # 关键词优先级（越小越好）
@@ -164,16 +182,16 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
         ratio = (c.taken / c.total) if c.total else 1.0
         return (kw_rank, t_rank, ratio)
 
-    pool.sort(key=score)
+    matched_pool.sort(key=score)
 
     # 拥挤过滤
-    for c in pool:
+    for c in matched_pool:
         ratio_ok = (c.taken / c.total) < MAX_OCCUPANCY_RATIO if c.total else True
         abs_ok = (c.taken <= MAX_ABSOLUTE_TAKEN) if (MAX_ABSOLUTE_TAKEN is not None) else True
         if ratio_ok and abs_ok:
             return c
     # 如果都很挤，退而求其次拿第一名
-    return pool[0] if pool else None
+    return matched_pool[0] if matched_pool else None
 
 
 def norm_url(href: str) -> str:
@@ -182,6 +200,33 @@ def norm_url(href: str) -> str:
     if href.startswith("/"):
         return BASE + href
     return BASE + "/" + href
+
+
+SelectorInput = Union[Iterable[str], str, None]
+
+
+def _as_selector_list(selectors: SelectorInput) -> List[str]:
+    if not selectors:
+        return []
+    if isinstance(selectors, str):
+        return [selectors]
+    return [s for s in selectors if s]
+
+
+def _click_first_selector(page, selectors: Iterable[str], timeout: int) -> bool:
+    last_err: Optional[Exception] = None
+    for sel in selectors:
+        try:
+            page.wait_for_selector(sel, timeout=timeout)
+            page.click(sel)
+            return True
+        except Exception as e:  # noqa: BLE001 -- 尽量不因单个失败终止
+            last_err = e
+    if last_err:
+        print(f"[E] 未能点击任何按钮选择器：{selectors}。最后错误：{last_err}")
+    else:
+        print(f"[E] 未配置有效的按钮选择器。")
+    return False
 
 
 def playwright_book(order_url: str, headless: bool = True) -> bool:
@@ -214,21 +259,23 @@ def playwright_book(order_url: str, headless: bool = True) -> bool:
         # 这里可选：如果页面需要先选择日期/场地/人数，补充相应点击逻辑
         # 例如：page.click("text=选择日期"); page.click("text=今天")
 
+        submit_selectors = _as_selector_list(ORDER_SUBMIT_SELECTORS)
+        if not submit_selectors:
+            print("[E] 未配置下单按钮选择器，请设置 ORDER_SUBMIT_SELECTORS。")
+            return False
+
         # 点击“立即预约”
-        try:
-            page.wait_for_selector(ORDER_SUBMIT_SELECTOR, timeout=10000)
-            page.click(ORDER_SUBMIT_SELECTOR)
-        except Exception as e:
-            print(f"[E] 未找到预约按钮选择器：{ORDER_SUBMIT_SELECTOR}，请检查。{e}")
+        if not _click_first_selector(page, submit_selectors, timeout=10000):
             return False
 
         # 确认弹窗（如有）
-        if ORDER_DIALOG_CONFIRM_SELECTOR:
+        dialog_selectors = _as_selector_list(ORDER_DIALOG_CONFIRM_SELECTORS)
+        for sel in dialog_selectors:
             try:
-                page.wait_for_selector(ORDER_DIALOG_CONFIRM_SELECTOR, timeout=5000)
-                page.click(ORDER_DIALOG_CONFIRM_SELECTOR)
+                page.click(sel, timeout=3000)
+                break
             except Exception:
-                pass
+                continue
 
         # 结果判定：监听典型提示
         ok = False
@@ -317,7 +364,7 @@ def main():
         print("[!] 预约未成功。可能原因：")
         print("  - Cookie 失效/未登录；")
         print("  - 需要先选择具体场地/人数/勾选协议；")
-        print("  - 页面按钮选择器不匹配（请更新 ORDER_SUBMIT_SELECTOR）；")
+        print("  - 页面按钮选择器不匹配（请更新 ORDER_SUBMIT_SELECTORS）；")
         print("  - 被风控或名额瞬间抢空；")
         print("  - 存在验证码（需要人工介入）。")
         sys.exit(2)
