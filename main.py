@@ -264,47 +264,106 @@ def playwright_book(order_url: str, headless: bool = True) -> bool:
             print("[E] 未配置下单按钮选择器，请设置 ORDER_SUBMIT_SELECTORS。")
             return False
 
-        # 点击“立即预约”
-        if not _click_first_selector(page, submit_selectors, timeout=10000):
-            return False
-
-        # 确认弹窗（如有）
-        dialog_selectors = _as_selector_list(ORDER_DIALOG_CONFIRM_SELECTORS)
-        for sel in dialog_selectors:
-            try:
-                page.click(sel, timeout=3000)
-                break
-            except Exception:
-                continue
-
-        # 结果判定：监听典型提示
-        ok = False
+        # 结果判定：优先等待后端 /course/order_confirm 响应
+        network_ok: Optional[bool] = None
         try:
-            # 常见成功提示关键词，可按页面实际改
-            page.wait_for_timeout(800)  # 等一会儿
-            content = page.content()
-            if any(k in content for k in ["预约成功", "提交成功", "预订成功", "已预约"]):
-                ok = True
-        except Exception:
-            pass
+            with page.expect_response(
+                lambda r: (
+                    r.request.method == "POST"
+                    and "/course/order_confirm" in r.url
+                ),
+                timeout=15000,
+            ) as resp_info:
+                if not _click_first_selector(page, submit_selectors, timeout=10000):
+                    network_ok = False
+                    raise RuntimeError("button selectors not clickable")
 
-        # 也可：检查是否跳转到“我的预约/订单详情”界面
-        current_url = page.url
-        if re.search(r"/order/detail|/mine/order|success", current_url):
-            ok = True
+                dialog_selectors = _as_selector_list(ORDER_DIALOG_CONFIRM_SELECTORS)
+                for sel in dialog_selectors:
+                    try:
+                        page.click(sel, timeout=3000)
+                        break
+                    except Exception:
+                        continue
 
-        if not ok:
-            # 再粗暴一点：看有没有“已满/爆满/失败”等字样
-            content = page.content()
-            if any(k in content for k in ["已满", "失败", "异常", "请稍后重试", "爆棚"]):
-                ok = False
+            resp = resp_info.value
+            try:
+                ctype = resp.headers.get("content-type", "")
+            except Exception:
+                ctype = ""
+
+            data: Any = None
+            try:
+                if "application/json" in ctype:
+                    data = resp.json()
+                else:
+                    txt = resp.text()
+                    try:
+                        data = json.loads(txt)
+                    except Exception:
+                        data = {"raw": txt}
+            except Exception as e:  # noqa: BLE001
+                print(f"[W] 无法解析后端响应：{e}")
+
+            if isinstance(data, dict):
+                code = str(data.get("code", "")).strip()
+                msg = str(
+                    data.get("msg")
+                    or data.get("message")
+                    or data.get("error")
+                    or ""
+                ).strip()
+                status_val = str(data.get("status", "")).lower()
+                success_flag = (
+                    code in ("0", "1", "200")
+                    or data.get("success") is True
+                    or str(data.get("success")).lower() == "true"
+                    or status_val in ("success", "ok", "1", "true")
+                    or "成功" in msg
+                )
+                if success_flag:
+                    network_ok = True
+                else:
+                    network_ok = False
+                    detail = msg or json.dumps(data, ensure_ascii=False)
+                    if code:
+                        print(f"[E] 后端返回（code={code}）：{detail}")
+                    else:
+                        print(f"[E] 后端返回：{detail}")
+            elif data is not None:
+                print(f"[W] 未知的响应格式：{data}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[W] 未捕获到下单响应或等待超时：{e}")
+
+        if network_ok is None:
+            # 结果判定安全网：监听典型提示
+            dom_ok = False
+            try:
+                page.wait_for_timeout(800)
+                content = page.content()
+                if any(k in content for k in ["预约成功", "提交成功", "预订成功", "已预约"]):
+                    dom_ok = True
+            except Exception:
+                pass
+
+            if not dom_ok:
+                current_url = page.url
+                if re.search(r"/order/detail|/mine/order|success", current_url):
+                    dom_ok = True
+
+            if not dom_ok:
+                content = page.content()
+                if any(k in content for k in ["已满", "失败", "异常", "请稍后重试", "爆棚"]):
+                    dom_ok = False
+
+            network_ok = dom_ok
 
         if not headless:
             # 留个 3 秒观察
             page.wait_for_timeout(3000)
 
         browser.close()
-        return ok
+        return bool(network_ok)
 
 
 def main():
