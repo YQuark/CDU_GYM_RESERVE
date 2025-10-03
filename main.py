@@ -44,6 +44,8 @@ ORDER_DIALOG_CONFIRM_SELECTORS = [
 
 # 选课策略：优先匹配的关键词（按优先级从高到低）
 PREFERRED_KEYWORDS = ["健身中心（午）"]
+# 当设置了关键词时，是否必须匹配其一才视为候选；否则回退到所有可预约课程
+REQUIRE_KEYWORD_MATCH = True
 
 # 时间窗口过滤（字符串包含即可，留空不过滤）
 PREFERRED_TIME_RANGES = []
@@ -161,6 +163,15 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
     if not pool:
         return None
 
+    matched_pool = pool
+    if PREFERRED_KEYWORDS and REQUIRE_KEYWORD_MATCH:
+        matched_pool = [
+            c for c in pool if any(kw in c.title for kw in PREFERRED_KEYWORDS)
+        ]
+        if not matched_pool:
+            print("[!] 未找到匹配关键字的课程，将回退至全部可预约课程。")
+            matched_pool = pool
+
     # 时间与关键词优先
     def score(c: Course) -> Tuple[int, int, float]:
         # 关键词优先级（越小越好）
@@ -171,16 +182,16 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
         ratio = (c.taken / c.total) if c.total else 1.0
         return (kw_rank, t_rank, ratio)
 
-    pool.sort(key=score)
+    matched_pool.sort(key=score)
 
     # 拥挤过滤
-    for c in pool:
+    for c in matched_pool:
         ratio_ok = (c.taken / c.total) < MAX_OCCUPANCY_RATIO if c.total else True
         abs_ok = (c.taken <= MAX_ABSOLUTE_TAKEN) if (MAX_ABSOLUTE_TAKEN is not None) else True
         if ratio_ok and abs_ok:
             return c
     # 如果都很挤，退而求其次拿第一名
-    return pool[0] if pool else None
+    return matched_pool[0] if matched_pool else None
 
 
 def norm_url(href: str) -> str:

@@ -45,8 +45,10 @@ DIALOG_CONFIRM_SELECTORS = [
 ]
 
 # 选课策略
-PREFERRED_KEYWORDS = ["健身中心（午）", "游泳馆（午）", "游泳馆"]
+PREFERRED_KEYWORDS = ["健身中心（午）"]
 PREFERRED_TIME_RANGES = ["12:30 - 14:00", "19:00 - 21:00"]
+# 当设置了关键词时，是否必须命中其一；若无匹配可回退到全部课程
+REQUIRE_KEYWORD_MATCH = True
 
 # 拥挤限制
 MAX_OCCUPANCY_RATIO = 0.98
@@ -136,20 +138,65 @@ def pick_course(courses: List[Course]) -> Optional[Course]:
     if not pool:
         return None
 
+    matched_pool = pool
+    if PREFERRED_KEYWORDS and REQUIRE_KEYWORD_MATCH:
+        matched_pool = [
+            c for c in pool if any(kw in c.title for kw in PREFERRED_KEYWORDS)
+        ]
+        if not matched_pool:
+            print("[!] 未找到匹配关键字的课程，将回退至全部可预约课程。")
+            matched_pool = pool
+
     def score(c: Course) -> Tuple[int, int, float]:
         kw_rank = min((i for i, kw in enumerate(PREFERRED_KEYWORDS) if kw in c.title), default=999)
         t_rank = min((i for i, tr in enumerate(PREFERRED_TIME_RANGES) if tr in c.time_range), default=999)
         ratio = (c.taken / c.total) if c.total else 1.0
         return (kw_rank, t_rank, ratio)
 
-    pool.sort(key=score)
+    matched_pool.sort(key=score)
 
-    for c in pool:
+    for c in matched_pool:
         ratio_ok = (c.taken / c.total) < MAX_OCCUPANCY_RATIO if c.total else True
         abs_ok = (c.taken <= MAX_ABSOLUTE_TAKEN) if (MAX_ABSOLUTE_TAKEN is not None) else True
         if ratio_ok and abs_ok:
             return c
-    return pool[0] if pool else None
+    return matched_pool[0] if matched_pool else None
+
+
+SelectorInput = Union[Iterable[str], str, None]
+
+
+def _as_selector_list(selectors: SelectorInput) -> List[str]:
+    if not selectors:
+        return []
+    if isinstance(selectors, str):
+        return [selectors]
+    return [s for s in selectors if s]
+
+
+async def _click_first_selector(page, selectors: Iterable[str], timeout: int) -> bool:
+    last_err: Optional[Exception] = None
+    for sel in selectors:
+        try:
+            await page.wait_for_selector(sel, timeout=timeout)
+            await page.click(sel)
+            return True
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    if last_err:
+        print(f"[E] 未能点击任何按钮选择器：{selectors}。最后错误：{last_err}")
+    else:
+        print("[E] 未配置有效的按钮选择器。")
+    return False
+
+
+async def _confirm_dialog(page, selectors: Iterable[str]) -> None:
+    for sel in selectors:
+        try:
+            await page.click(sel, timeout=3000)
+            break
+        except Exception:
+            continue
 
 
 SelectorInput = Union[Iterable[str], str, None]
