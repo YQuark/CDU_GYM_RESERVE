@@ -37,6 +37,8 @@ ORDER_SUBMIT_SELECTORS = [
 
 # 如果存在确认弹窗（如“确认预约？”），依次尝试点击这些按钮
 ORDER_DIALOG_CONFIRM_SELECTORS = [
+    'text=确认预约',
+    'button:has-text("确认预约")',
     'text=确定',
     'button:has-text("确定")',
     '.layui-m-layerbtn span:last-child',
@@ -229,6 +231,28 @@ def _click_first_selector(page, selectors: Iterable[str], timeout: int) -> bool:
     return False
 
 
+def _confirm_dialog(
+    page,
+    selectors: Iterable[str],
+    fallback_selectors: Optional[Iterable[str]] = None,
+    timeout: int = 3000,
+) -> bool:
+    for sel in selectors:
+        try:
+            page.click(sel, timeout=timeout)
+            return True
+        except Exception:
+            continue
+
+    if fallback_selectors:
+        print("[W] 弹窗确认按钮未匹配，尝试使用下单按钮选择器作为回退。")
+        if _click_first_selector(page, fallback_selectors, timeout=timeout):
+            return True
+
+    print("[W] 未执行弹窗确认步骤（未找到可点击的确认按钮）。")
+    return False
+
+
 def playwright_book(order_url: str, headless: bool = True) -> bool:
     """
     用 Playwright 打开订单页并点击“立即预约”。
@@ -345,6 +369,7 @@ def playwright_book(order_url: str, headless: bool = True) -> bool:
                     dom_ok = True
             except Exception:
                 pass
+
 
             if not dom_ok:
                 current_url = page.url
