@@ -174,17 +174,19 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
             if sel == "#do_order":
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await page.wait_for_function(
-                    "selector => {"
-                    "  const el = document.querySelector(selector);"
-                    "  if (!el) return false;"
-                    "  const style = window.getComputedStyle(el);"
-                    "  if (!style) return false;"
-                    "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
-                    "  const disabled = el.hasAttribute('disabled')"
-                    "    || el.getAttribute('aria-disabled') === 'true'"
-                    "    || el.classList.contains('disabled');"
-                    "  return !hidden && !disabled;"
-                    "}",
+                    (
+                        "selector => {"
+                        "  const el = document.querySelector(selector);"
+                        "  if (!el) return false;"
+                        "  const style = window.getComputedStyle(el);"
+                        "  if (!style) return false;"
+                        "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
+                        "  const disabled = el.hasAttribute('disabled')"
+                        "    || el.getAttribute('aria-disabled') === 'true'"
+                        "    || el.classList.contains('disabled');"
+                        "  return !hidden && !disabled;"
+                        "}"
+                    ),
                     sel,
                     timeout=timeout,
                 )
@@ -281,17 +283,19 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                     if primary_selector == "#do_order":
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         await page.wait_for_function(
-                            "selector => {"
-                            "  const el = document.querySelector(selector);"
-                            "  if (!el) return false;"
-                            "  const style = window.getComputedStyle(el);"
-                            "  if (!style) return false;"
-                            "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
-                            "  const disabled = el.hasAttribute('disabled')"
-                            "    || el.getAttribute('aria-disabled') === 'true'"
-                            "    || el.classList.contains('disabled');"
-                            "  return !hidden && !disabled;"
-                            "}",
+                            (
+                                "selector => {"
+                                "  const el = document.querySelector(selector);"
+                                "  if (!el) return false;"
+                                "  const style = window.getComputedStyle(el);"
+                                "  if (!style) return false;"
+                                "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
+                                "  const disabled = el.hasAttribute('disabled')"
+                                "    || el.getAttribute('aria-disabled') === 'true'"
+                                "    || el.classList.contains('disabled');"
+                                "  return !hidden && !disabled;"
+                                "}"
+                            ),
                             primary_selector,
                             timeout=10000,
                         )
