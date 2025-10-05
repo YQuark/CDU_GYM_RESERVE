@@ -35,14 +35,9 @@ RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed
 # 订单页上的按钮与弹窗
 ORDER_BUTTON_SELECTORS = [
     "#do_order",
-    'button:has-text("确认预约")',
-    'button:has-text("立即预约")',
 ]
 DIALOG_CONFIRM_SELECTORS = [
-    'text=确认预约',
-    'button:has-text("确认预约")',
-    'text=确定',
-    'button:has-text("确定")',
+    "text=确定",
     ".layui-m-layerbtn span:last-child",
 ]
 
@@ -180,8 +175,30 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
     last_err: Optional[Exception] = None
     for sel in selectors:
         try:
+            if sel == "#do_order":
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_function(
+                    "selector => {"
+                    "  const el = document.querySelector(selector);"
+                    "  if (!el) return false;"
+                    "  const style = window.getComputedStyle(el);"
+                    "  if (!style) return false;"
+                    "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
+                    "  const disabled = el.hasAttribute('disabled')"
+                    "    || el.getAttribute('aria-disabled') === 'true'"
+                    "    || el.classList.contains('disabled');"
+                    "  return !hidden && !disabled;"
+                    "}",
+                    sel,
+                    timeout=timeout,
+                )
             await page.wait_for_selector(sel, timeout=timeout)
-            await page.click(sel)
+            loc = page.locator(sel)
+            await loc.scroll_into_view_if_needed()
+            try:
+                await loc.click()
+            except Exception:
+                await loc.click(force=True)
             return True
         except Exception as e:  # noqa: BLE001
             last_err = e
@@ -230,7 +247,12 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
     for sel in selectors:
         try:
             await page.wait_for_selector(sel, timeout=timeout)
-            await page.click(sel)
+            loc = page.locator(sel)
+            await loc.scroll_into_view_if_needed()
+            try:
+                await loc.click()
+            except Exception:
+                await loc.click(force=True)
             return True
         except Exception as e:  # noqa: BLE001
             last_err = e
