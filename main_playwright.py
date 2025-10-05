@@ -35,15 +35,6 @@ RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed
 # 订单页上的按钮与弹窗
 ORDER_BUTTON_SELECTORS = [
     "#do_order",
-    'button:has-text("确认预约")',
-    'button:has-text("立即预约")',
-]
-DIALOG_CONFIRM_SELECTORS = [
-    'text=确认预约',
-    'button:has-text("确认预约")',
-    'text=确定',
-    'button:has-text("确定")',
-    ".layui-m-layerbtn span:last-child",
 ]
 
 # 选课策略
@@ -180,57 +171,30 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
     last_err: Optional[Exception] = None
     for sel in selectors:
         try:
+            if sel == "#do_order":
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_function(
+                    "selector => {"
+                    "  const el = document.querySelector(selector);"
+                    "  if (!el) return false;"
+                    "  const style = window.getComputedStyle(el);"
+                    "  if (!style) return false;"
+                    "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
+                    "  const disabled = el.hasAttribute('disabled')"
+                    "    || el.getAttribute('aria-disabled') === 'true'"
+                    "    || el.classList.contains('disabled');"
+                    "  return !hidden && !disabled;"
+                    "}",
+                    sel,
+                    timeout=timeout,
+                )
             await page.wait_for_selector(sel, timeout=timeout)
-            await page.click(sel)
-            return True
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-    if last_err:
-        print(f"[E] 未能点击任何按钮选择器：{selectors}。最后错误：{last_err}")
-    else:
-        print("[E] 未配置有效的按钮选择器。")
-    return False
-
-
-async def _confirm_dialog(
-    page,
-    selectors: Iterable[str],
-    fallback_selectors: Optional[Iterable[str]] = None,
-    timeout: int = 3000,
-) -> bool:
-    for sel in selectors:
-        try:
-            await page.click(sel, timeout=timeout)
-            return True
-        except Exception:
-            continue
-
-    if fallback_selectors:
-        print("[W] 弹窗确认按钮未匹配，尝试使用下单按钮选择器作为回退。")
-        if await _click_first_selector(page, fallback_selectors, timeout=timeout):
-            return True
-
-    print("[W] 未执行弹窗确认步骤（未找到可点击的确认按钮）。")
-    return False
-
-
-SelectorInput = Union[Iterable[str], str, None]
-
-
-def _as_selector_list(selectors: SelectorInput) -> List[str]:
-    if not selectors:
-        return []
-    if isinstance(selectors, str):
-        return [selectors]
-    return [s for s in selectors if s]
-
-
-async def _click_first_selector(page, selectors: Iterable[str], timeout: int) -> bool:
-    last_err: Optional[Exception] = None
-    for sel in selectors:
-        try:
-            await page.wait_for_selector(sel, timeout=timeout)
-            await page.click(sel)
+            loc = page.locator(sel)
+            await loc.scroll_into_view_if_needed()
+            try:
+                await loc.click()
+            except Exception:
+                await loc.click(force=True)
             return True
         except Exception as e:  # noqa: BLE001
             last_err = e
@@ -312,13 +276,34 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                     ),
                     timeout=15000,
                 ) as resp_info:
-                    if not await _click_first_selector(page, submit_selectors, timeout=10000):
-                        raise RuntimeError("button selectors not clickable")
-                    await _confirm_dialog(
-                        page,
-                        _as_selector_list(DIALOG_CONFIRM_SELECTORS),
-                        fallback_selectors=submit_selectors,
-                    )
+                    primary_selector = submit_selectors[0]
+                    dlg_task = asyncio.create_task(page.wait_for_event("dialog"))
+                    if primary_selector == "#do_order":
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await page.wait_for_function(
+                            "selector => {"
+                            "  const el = document.querySelector(selector);"
+                            "  if (!el) return false;"
+                            "  const style = window.getComputedStyle(el);"
+                            "  if (!style) return false;"
+                            "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
+                            "  const disabled = el.hasAttribute('disabled')"
+                            "    || el.getAttribute('aria-disabled') === 'true'"
+                            "    || el.classList.contains('disabled');"
+                            "  return !hidden && !disabled;"
+                            "}",
+                            primary_selector,
+                            timeout=10000,
+                        )
+                    await page.wait_for_selector(primary_selector, timeout=10000)
+                    loc = page.locator(primary_selector)
+                    await loc.scroll_into_view_if_needed()
+                    try:
+                        await loc.click()
+                    except Exception:
+                        await loc.click(force=True)
+                    dlg = await dlg_task
+                    await dlg.accept()
 
                 resp = await resp_info.value
                 ctype = resp.headers.get("content-type", "")
@@ -429,7 +414,7 @@ async def main_async():
         print("[!] 预约未成功。可能原因：")
         print("  - Cookie 失效/未登录；")
         print("  - 需要先选择附加项（人数/协议/场地）或页面改版；")
-        print("  - 弹窗按钮选择器不匹配（请调整 DIALOG_CONFIRM_SELECTORS）；")
+        print("  - 浏览器弹窗被拦截或页面改版；")
         print("  - 名额瞬间抢空/风控/验证码。")
 
 
