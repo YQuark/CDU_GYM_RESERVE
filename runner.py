@@ -222,6 +222,10 @@ def _log_result(record: TaskExecutionRecord, log_json: bool) -> None:
     print(
         f"  -> 结果: {status} | 原因: {outcome.reason} | HTTP: {outcome.http_status} | code: {outcome.code} | msg: {outcome.msg}"
     )
+    if outcome.final_url:
+        print(f"  -> 最终URL: {outcome.final_url}")
+    if outcome.evidence:
+        print(f"  -> 证据: {outcome.evidence}")
     if course_info:
         print(
             f"  -> 课程: {course_info.get('title')} | {course_info.get('time')} | 链接: {course_info.get('href')}"
@@ -232,12 +236,8 @@ def _log_result(record: TaskExecutionRecord, log_json: bool) -> None:
             "account": spec.account.name,
             "task": {
                 "date": spec.date,
-                "title_keywords": list(spec.title_keywords),
-                "time_keywords": list(spec.time_keywords),
-                "strict_match": spec.strict_match,
-                "allow_fallback": spec.allow_fallback,
-                "max_attempts": spec.max_attempts,
-                "delay_ms": list(spec.delay_ms),
+                "title": list(spec.title_keywords),
+                "time": list(spec.time_keywords),
             },
             "status": status,
             "reason": outcome.reason,
@@ -245,7 +245,6 @@ def _log_result(record: TaskExecutionRecord, log_json: bool) -> None:
             "code": outcome.code,
             "msg": outcome.msg,
             "req_id": outcome.req_id,
-            "course": course_info,
-            "attempts": record.attempts,
+            "final_url": outcome.final_url,
         }
         print(json.dumps(payload, ensure_ascii=False))

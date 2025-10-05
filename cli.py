@@ -179,6 +179,10 @@ def _handle_reserve(args: argparse.Namespace) -> int:
     outcome = run_once(run_request)
     status = "SUCCESS" if outcome.success else "FAIL"
     print(f"[reserve] 状态={status} 原因={outcome.reason} HTTP={outcome.http_status} code={outcome.code}")
+    if outcome.final_url:
+        print(f"[reserve] 最终URL: {outcome.final_url}")
+    if outcome.evidence:
+        print(f"[reserve] 证据: {outcome.evidence}")
     if outcome.course:
         print(
             f"[reserve] 课程: {outcome.course.get('title')} | {outcome.course.get('time')} | {outcome.course.get('href')}"

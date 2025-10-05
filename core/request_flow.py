@@ -25,9 +25,11 @@ DEFAULT_CARD_CAT_ID = "8566400"
 DEFAULT_COURSE_ID = "8225475"
 
 _AVAILABLE_STATUSES = {"available", "hot", "queue"}
-_BUSY_KEYWORDS = ("系统繁忙", "稍后再试", "频繁")
-_FULL_KEYWORDS = ("课程已满", "排队", "不在可预约时间", "已满")
+_BUSY_KEYWORDS = ("系统繁忙", "稍后再试", "操作频繁", "频繁")
+_FULL_KEYWORDS = ("课程已满", "排队", "不在可预约时间", "已满", "名额已满", "约满")
 _LOGIN_KEYWORDS = ("请先登录", "登录后访问", "手机号", "验证码")
+_CARD_KEYWORDS = ("请选择会员卡", "会员卡", "卡")
+_SUCCESS_KEYWORDS = ("成功", "预约成功", "success")
 
 
 @dataclass
@@ -64,6 +66,8 @@ class RunOutcome:
     msg: Optional[str]
     req_id: Optional[str]
     course: Optional[Dict[str, str]]
+    final_url: Optional[str] = None
+    evidence: Optional[str] = None
     raw_response: Optional[str] = None
     retry_recommended: bool = False
 
@@ -341,6 +345,9 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg=str(exc),
             req_id=None,
             course=None,
+            final_url=None,
+            evidence=f"search HTTP error: status={status} err={exc}",
+            retry_recommended=(reason == "RATE_LIMIT"),
         )
     except Exception as exc:  # pragma: no cover - network specific
         return RunOutcome(
@@ -351,6 +358,8 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg=str(exc),
             req_id=None,
             course=None,
+            final_url=None,
+            evidence=f"search exception: {exc}",
         )
 
     class_list_html = (search_data.get("data") or {}).get("class_list") or ""
@@ -367,6 +376,9 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg=msg,
             req_id=None,
             course=None,
+            final_url=None,
+            evidence=f"search data missing class_list msg={msg}",
+            retry_recommended=(reason == "RATE_LIMIT"),
         )
 
     courses = parse_courses_from_html(class_list_html)
@@ -378,14 +390,18 @@ def run_once(request: RunRequest) -> RunOutcome:
         allow_fallback=request.allow_fallback,
     )
     if not selected_course:
+        reason = failure_reason or "NO_MATCH"
+        msg = "课程未匹配" if reason == "NO_MATCH" else "目标课程不可预约"
         return RunOutcome(
             success=False,
-            reason=failure_reason or "NO_MATCH",
+            reason=reason,
             http_status=None,
             code=search_data.get("code") if isinstance(search_data, dict) else None,
-            msg="课程未匹配",
+            msg=msg,
             req_id=None,
             course=None,
+            final_url=None,
+            evidence=f"选课失败: reason={reason} strict={request.strict_match} allow_fallback={request.allow_fallback}",
         )
 
     order_url = norm_url(selected_course.get("href", ""))
@@ -394,6 +410,7 @@ def run_once(request: RunRequest) -> RunOutcome:
 
     referer = f"{BASE}/m/{SPACE}/default/index?type=1"
     order_response = get_html_with_browser_headers(session, order_url, referer)
+    final_order_url = order_response.url or order_url
     if order_response.status_code != 200:
         return RunOutcome(
             success=False,
@@ -403,26 +420,33 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg="订单页拉取失败",
             req_id=None,
             course=selected_course,
+            final_url=final_order_url,
+            evidence=f"订单页返回状态码 {order_response.status_code}",
         )
-    if any(k in order_response.url for k in ("/login", "/passport")) and "course/order" not in order_response.url:
+    if any(k in final_order_url for k in ("/login", "/passport")) and "course/order" not in final_order_url:
         return RunOutcome(
             success=False,
-            reason="REDIRECT_LOGIN",
+            reason="COOKIE_INVALID",
             http_status=order_response.status_code,
             code=None,
             msg="订单页重定向至登录",
             req_id=None,
             course=selected_course,
+            final_url=final_order_url,
+            evidence=f"订单页被重定向到 {final_order_url}",
         )
     if any(word in order_response.text for word in _LOGIN_KEYWORDS):
+        snippet = order_response.text[:120]
         return RunOutcome(
             success=False,
-            reason="REDIRECT_LOGIN",
+            reason="COOKIE_INVALID",
             http_status=order_response.status_code,
             code=None,
             msg="页面提示需要登录",
             req_id=None,
             course=selected_course,
+            final_url=final_order_url,
+            evidence=f"订单页提示登录: {snippet}",
         )
 
     fields = extract_hidden_fields(order_response.text)
@@ -449,6 +473,8 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg="未解析到 course_id",
             req_id=None,
             course=selected_course,
+            final_url=final_order_url,
+            evidence="订单页缺少 course_id 字段",
         )
 
     preferred_keywords = list(request.preferred_card_keywords or [])
@@ -481,6 +507,8 @@ def run_once(request: RunRequest) -> RunOutcome:
                     msg=last_err or "未找到可用卡",
                     req_id=None,
                     course=selected_course,
+                    final_url=final_order_url,
+                    evidence="未能解析到 member_card_id/card_cat_id",
                 )
 
     if not fields.get("member_card_id") or not fields.get("card_cat_id"):
@@ -492,6 +520,8 @@ def run_once(request: RunRequest) -> RunOutcome:
             msg="缺少卡信息",
             req_id=None,
             course=selected_course,
+            final_url=final_order_url,
+            evidence="提交订单所需卡信息缺失",
         )
 
     fields.setdefault("time_from_stamp", "0")
@@ -501,11 +531,11 @@ def run_once(request: RunRequest) -> RunOutcome:
 
     confirm_response = post_order_confirm(session, referer=order_url, payload=fields)
     http_status = confirm_response.status_code
+    final_confirm_url = confirm_response.url or order_url
     text_head = confirm_response.text[:300]
     code = None
     msg = None
     req_id = None
-    retry_recommended = False
     try:
         data = confirm_response.json()
     except ValueError:
@@ -518,28 +548,34 @@ def run_once(request: RunRequest) -> RunOutcome:
         msg = text_head
 
     success = False
-    if isinstance(data, dict):
-        if data.get("code") == 200:
-            success = True
-        elif msg and any(word in msg for word in ("成功", "success")):
-            success = True
-    if not success and confirm_response.text:
-        txt = confirm_response.text
-        if any(word in txt for word in ("成功", "预约成功", "success")):
-            success = True
+    if isinstance(data, dict) and data.get("code") == 200:
+        success = True
+    if not success and msg and any(word in msg for word in _SUCCESS_KEYWORDS):
+        success = True
+    if not success and confirm_response.text and any(
+        word in confirm_response.text for word in _SUCCESS_KEYWORDS
+    ):
+        success = True
 
+    body = confirm_response.text or ""
+    evidence = ""
     reason = "OK" if success else "UNKNOWN"
-    if not success:
-        candidate_reason = "UNKNOWN"
-        body = (msg or confirm_response.text or "")
-        if any(word in body for word in _BUSY_KEYWORDS):
-            candidate_reason = "RATE_LIMIT"
-            retry_recommended = True
+    if success:
+        evidence = f"order_confirm成功: code={code} msg={msg}"
+    else:
+        evidence = f"order_confirm返回: code={code} msg={msg or text_head}"
+        if any(k in final_confirm_url for k in ("/login", "/passport")):
+            reason = "REDIRECT_LOGIN"
+        elif any(word in body for word in _BUSY_KEYWORDS):
+            reason = "RATE_LIMIT"
+        elif any(word in body for word in _CARD_KEYWORDS):
+            reason = "CARD_MISSING"
         elif any(word in body for word in _FULL_KEYWORDS):
-            candidate_reason = "COURSE_FULL"
-        elif "登录" in body:
-            candidate_reason = "REDIRECT_LOGIN"
-        reason = candidate_reason
+            reason = "COURSE_FULL"
+        elif any(word in body for word in _LOGIN_KEYWORDS):
+            reason = "REDIRECT_LOGIN"
+        else:
+            reason = "UNKNOWN"
 
     return RunOutcome(
         success=success,
@@ -553,6 +589,8 @@ def run_once(request: RunRequest) -> RunOutcome:
             "time": selected_course.get("time", ""),
             "href": order_url,
         },
+        final_url=final_confirm_url,
+        evidence=evidence,
         raw_response=text_head,
-        retry_recommended=retry_recommended,
+        retry_recommended=(reason == "RATE_LIMIT"),
     )
