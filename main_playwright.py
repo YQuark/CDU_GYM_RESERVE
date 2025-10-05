@@ -299,7 +299,7 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                             timeout=10000,
                         )
                     await page.wait_for_selector(primary_selector, timeout=10000)
-                    async with page.expect_dialog() as dlg_info:
+                    async with page.expect_event("dialog", timeout=20000) as dlg_info:
                         loc = page.locator(primary_selector)
                         await loc.scroll_into_view_if_needed()
                         try:
