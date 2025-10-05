@@ -401,16 +401,37 @@ def run_once(date: str, shop_id: str) -> bool:
     print("[order_confirm] HTTP", resp.status_code)
     print("[resp head]", txt_head.replace("\n", " ")[:300])
 
-    # 有的返回不是 JSON，而是直接渲染成功页或返回“success”的 HTML 片段
-    ok = (resp.status_code == 200) and ("success" in resp.url or "/course/success" in resp.text or "成功" in resp.text)
+    ok = False
+    json_obj = None
+    try:
+        json_obj = resp.json()
+    except Exception:
+        json_obj = None
+
+    if isinstance(json_obj, dict):
+        if json_obj.get("code") == 200:
+            ok = True
+        elif str(json_obj.get("msg", "")) and any(k in str(json_obj.get("msg", "")) for k in ["成功", "success", "预约成功"]):
+            ok = True
+
     if not ok:
-        # 有些会 302 跳转到 /success；我们手动试探一下
-        try:
-            r2 = s.get(f"{BASE}/m/{SPACE}/course/success", timeout=6)
-            if r2.status_code == 200 and ("成功" in r2.text or "预约成功" in r2.text):
-                ok = True
-        except Exception:
-            pass
+        txt = resp.text or ""
+        if ("成功" in txt) or ("预约成功" in txt) or ("success" in txt) or ("\u6210\u529f" in txt):
+            ok = True
+        elif "/course/success" in txt:
+            ok = True
+        elif hasattr(resp, "url") and isinstance(resp.url, str) and ("success" in resp.url):
+            ok = True
+        else:
+            try:
+                r2 = s.get(f"{BASE}/m/{SPACE}/course/success", timeout=6)
+                if r2.status_code == 200 and ("成功" in r2.text or "预约成功" in r2.text):
+                    ok = True
+            except Exception:
+                pass
+
+    if isinstance(json_obj, dict):
+        print("[order_confirm.json]", {"code": json_obj.get("code"), "msg": json_obj.get("msg"), "req_id": json_obj.get("req_id")})
 
     print("[结果]", "成功" if ok else "失败")
     return ok
