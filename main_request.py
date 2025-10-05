@@ -29,6 +29,7 @@ MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
 
 DEFAULT_MEMBER_CARD_ID = "13413533"  # 你的 member_card_id
 DEFAULT_CARD_CAT_ID    = "8566400"   # 你的 card_cat_id
+DEFAULT_COURSE_ID      = "8225475"   # 兜底 course_id（仅在无法解析时使用）
 
 # 把浏览器里的整串 Cookie 粘进来（同一账号、同一设备）
 RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed422776; sass_gym_shop_owner=8d5c1b09e9bcdb787f2b00cd3a730d49b1f1142fa0a7ae9f7f6ac4e329a3a985a%3A2%3A%7Bi%3A0%3Bs%3A19%3A%22sass_gym_shop_owner%22%3Bi%3A1%3Bs%3A8%3A%22e74abd6e%22%3B%7D; Hm_lvt_f4a079b93f8455a44b27c20205cbb8b3=1759507757; HMACCOUNT=DDF29FB8313FFB52; rsource=1320acdbe79dceaac8a47a5bb72c36af3f9a292693e3bf536e960a7c67631e56a%3A2%3A%7Bi%3A0%3Bs%3A7%3A%22rsource%22%3Bi%3A1%3Bs%3A7%3A%22styd.cn%22%3B%7D; PHPSESSID=95hglj7jri5edbittpub3ol2o0; sass_gym_wap=d2500380f34de647cdbee6ac749a9897275e10ee31db81dcb912a3fb28bbc58fa%3A2%3A%7Bi%3A0%3Bs%3A12%3A%22sass_gym_wap%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; sass_gym_base=d647e2f758cbb4b43c34e53b57eefc2f55d24ae78e5ab30df0dc8043d5a427cca%3A2%3A%7Bi%3A0%3Bs%3A13%3A%22sass_gym_base%22%3Bi%3A1%3Bs%3A41%3A%222f4f340d142c1cc5c5173fe49fbc1c92%2329356716%22%3B%7D; club_gym_fav_shop_id=dc8d145bd76114fc5213fa9e22c6ac58f7879d80a53a57872cb0d2fd4ef0dabca%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22club_gym_fav_shop_id%22%3Bi%3A1%3Bi%3A612773420%3B%7D; saas_gym_buy_referer=3909ac13f0218caf1d861b024048b94123b89f38fba14ca389d1735ed62f8528a%3A2%3A%7Bi%3A0%3Bs%3A20%3A%22saas_gym_buy_referer%22%3Bi%3A1%3Bs%3A55%3A%22https%3A%2F%2Fwww.styd.cn%2Fm%2Fe74abd6e%2Fcourse%2Forder%3Fid%3D89007443%22%3B%7D; Hm_lpvt_f4a079b93f8455a44b27c20205cbb8b3=1759509539"""
@@ -210,8 +211,24 @@ def post_order_confirm(s: requests.Session, referer: str, payload: Dict[str, str
         "Referer": referer,
     }
     # 直接表单提交
-    r = s.post(ORDER_CONFIRM, data=payload, headers=headers, timeout=10)
-    return r
+    last_resp = None
+    for attempt in range(2):
+        r = s.post(ORDER_CONFIRM, data=payload, headers=headers, timeout=10)
+        last_resp = r
+        retry = False
+        if "系统繁忙" in r.text:
+            retry = True
+        else:
+            try:
+                data = r.json()
+                if data.get("code") == -1:
+                    retry = True
+            except ValueError:
+                pass
+        if not retry or attempt == 1:
+            break
+        time.sleep(0.2)
+    return last_resp
 def fetch_cards_from_user_card(s: requests.Session) -> list[dict]:
     """从 我的卡 页面解析可用卡，返回 [{name, member_card_id, card_cat_id}]"""
     url = f"{BASE}/m/{SPACE}/user/card"
@@ -326,6 +343,17 @@ def run_once(date: str, shop_id: str) -> bool:
     # 确保关键字段存在/校正
     fields["class_id"] = fields.get("class_id") or class_id
 
+    if not fields.get("course_id"):
+        m = re.search(r'name=["\']course_id["\']\s+value=["\'](\d+)["\']', r.text)
+        if m:
+            fields["course_id"] = m.group(1)
+    if not fields.get("course_id"):
+        m = re.search(r'["\']course_id["\']\s*[:=]\s*["\']?(\d+)["\']?', r.text)
+        if m:
+            fields["course_id"] = m.group(1)
+    if not fields.get("course_id") and DEFAULT_COURSE_ID:
+        fields["course_id"] = DEFAULT_COURSE_ID
+
     # 部分站点把 course_id 写在隐藏域或 script 里；如果没拿到，就用你提供的上次值兜底（不推荐长期依赖）
     if not fields.get("course_id"):
         # 尝试在脚本里搜 course_id
@@ -348,6 +376,13 @@ def run_once(date: str, shop_id: str) -> bool:
 
     # 若有多卡，按关键字选一张
     fields = choose_card(fields, r.text)
+
+    need = ("member_card_id", "card_cat_id", "course_id", "class_id")
+    print("[payload]", {k: fields.get(k) for k in need})
+    missing = [k for k in need if not fields.get(k)]
+    if missing:
+        print("[E] Missing critical fields:", missing)
+        return False
 
     # 最后再兜底：必须键（按你抓包的例子）
     for k in ("member_card_id", "card_cat_id", "course_id"):
