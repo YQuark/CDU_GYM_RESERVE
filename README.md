@@ -34,6 +34,8 @@ Both scripts expose configuration constants at the top of the file:
 
 Adjust these values to match your own shop/space and booking preferences.
 
+> 默认 `SHOP_ID` 为 `612773420`。若学校只有一个第三方平台，此值通常不变；如需调整可通过命令行 `--shop` 或环境变量 `SHOP_ID` 覆盖。
+
 ## Usage / 使用方法
 
 ### `main.py`
