@@ -153,6 +153,7 @@ def _handle_reserve(args: argparse.Namespace) -> int:
         print("[E] 未提供 Cookie，请通过 --cookie 或 ACCOUNTS 配置。")
         return 1
     shop_id = args.shop or config.shop_id
+    print(f"[配置] 使用 shop_id = {shop_id}")
     titles = _parse_keywords(getattr(args, "title", None))
     times = _parse_keywords(getattr(args, "time", None))
     base_task = _resolve_keywords_from_config(config)
@@ -201,6 +202,7 @@ def _handle_show(args: argparse.Namespace) -> int:
         print("[E] 未提供 Cookie，请通过 --cookie 或 ACCOUNTS 配置。")
         return 1
     shop_id = args.shop or config.shop_id
+    print(f"[配置] 使用 shop_id = {shop_id}")
     session = create_session(cookie)
     try:
         data = fetch_search(session, date=args.date, shop_id=shop_id, tp="1")

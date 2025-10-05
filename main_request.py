@@ -50,6 +50,7 @@ def main() -> None:
         allow_fallback=allow_fallback,
         preferred_card_keywords=preferred_cards,
     )
+    print(f"[配置] 使用 shop_id = {request.shop_id}")
     outcome = run_once(request)
     if outcome.success:
         print("[结果] 成功")

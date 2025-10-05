@@ -174,6 +174,7 @@ def run_tasks(
 ) -> List[TaskExecutionRecord]:
     overrides = overrides or TaskOverrides()
     shop_id = shop_id_override or config.shop_id
+    print(f"[配置] 使用 shop_id = {shop_id}")
     specs = _build_runtime_specs(config, overrides)
     if not specs:
         return []
