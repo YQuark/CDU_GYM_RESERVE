@@ -280,28 +280,64 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                 ) as resp_info:
                     primary_selector = submit_selectors[0]
                     if primary_selector == "#do_order":
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        await page.wait_for_function(
-                            """
-                            selector => {
-                              const el = document.querySelector(selector);
-                              if (!el) return false;
-                              const style = window.getComputedStyle(el);
-                              if (!style) return false;
-                              const hidden = style.visibility === 'hidden' || style.display === 'none';
-                              const disabled = el.hasAttribute('disabled')
-                                || el.getAttribute('aria-disabled') === 'true'
-                                || el.classList.contains('disabled');
-                              return !hidden && !disabled;
-                            }
-                            """,
-                            arg=primary_selector,
-                            timeout=10000,
-                        )
+                        try:
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            await page.wait_for_timeout(200)
+                        except Exception:
+                            pass
+                        for sel in [
+                            "input[type='checkbox'][name*='agree']",
+                            "input[type='checkbox'][id*='agree']",
+                            "label:has-text('已阅读')",
+                            "label:has-text('同意')",
+                            "div:has-text('已阅读并同意')",
+                        ]:
+                            try:
+                                if "input" in sel:
+                                    await page.check(sel, timeout=600)
+                                else:
+                                    await page.click(sel, timeout=600)
+                                break
+                            except Exception:
+                                pass
+                        for sel in [
+                            ".card-list .item:not(.disabled)",
+                            ".vip-card-list .vip-card:not(.disabled)",
+                            ".card-item:not(.disabled)",
+                        ]:
+                            try:
+                                await page.click(sel, timeout=600)
+                                break
+                            except Exception:
+                                pass
+                        for sel in ["select[name='people']", "#people"]:
+                            try:
+                                await page.select_option(sel, "1", timeout=600)
+                                break
+                            except Exception:
+                                pass
+                        JS_CODE = """
+                        (sel) => {
+                          const el = document.querySelector(sel);
+                          if (!el) return false;
+                          const s = getComputedStyle(el);
+                          const disabled = el.classList.contains('disabled') || el.hasAttribute('disabled');
+                          const blocked = s.pointerEvents === 'none';
+                          const r = el.getBoundingClientRect();
+                          return !disabled && !blocked && r.width > 2 && r.height > 2;
+                        }
+                        """
+                        await page.wait_for_function(JS_CODE, arg="#do_order", timeout=8000)
                     await page.wait_for_selector(primary_selector, timeout=10000)
                     async with page.expect_event("dialog", timeout=20000) as dlg_info:
                         loc = page.locator(primary_selector)
                         await loc.scroll_into_view_if_needed()
+                        try:
+                            await page.dispatch_event("#do_order", "touchstart")
+                            await page.dispatch_event("#do_order", "touchend")
+                            await page.dispatch_event("#do_order", "click")
+                        except Exception:
+                            pass
                         try:
                             await loc.click()
                         except Exception:
