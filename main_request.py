@@ -38,6 +38,9 @@ RAW_COOKIE = r"""acw_tc=0aef82d717595077534875864ee3c54e2b8152570af745e9d511f9ed
 TARGET_TITLE_KEYWORDS = ["游泳馆（午）", "游泳馆"]   # 可改为 ["健身中心（午）", "健身中心"]
 TARGET_TIMERANGE_KEYWORDS = ["12:30 - 14:00"]       # 也可加入 "19:00 - 21:00"
 
+STRICT_MATCH = True          # if True, only consider courses matching keywords
+ALLOW_FALLBACK = True        # if no strict match, fallback to previous behavior
+
 # 如果有多张卡，按卡名/卡类型关键字挑一张（可留空：自动选第一张可用卡）
 PREFERRED_CARD_KEYWORDS = ["游泳", "次卡"]  # 例：先匹配含“游泳”的卡，再匹配“次卡”
 # ===== 配置结束 =====
@@ -113,11 +116,35 @@ def score_course(c: Dict[str, Any]) -> Tuple[int, int, float]:
 
 
 def pick_target(courses: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    # Only keep bookable statuses
     pool = [c for c in courses if c["status"] in ("available", "hot", "queue")]
     if not pool:
         return None
-    pool.sort(key=score_course)
-    return pool[0]
+
+    def match_keywords(c):
+        title_ok = (not TARGET_TITLE_KEYWORDS) or any(kw in c["title"] for kw in TARGET_TITLE_KEYWORDS)
+        time_ok = (not TARGET_TIMERANGE_KEYWORDS) or any(kw in c["time"] for kw in TARGET_TIMERANGE_KEYWORDS)
+        return title_ok and time_ok
+
+    strict_pool = [c for c in pool if match_keywords(c)]
+
+    # choose which pool to use
+    candidates = strict_pool if (STRICT_MATCH or (STRICT_MATCH and ALLOW_FALLBACK)) else pool
+    if STRICT_MATCH and not strict_pool and ALLOW_FALLBACK:
+        candidates = pool  # fallback to any available
+
+    if not candidates:
+        return None
+
+    # scoring (same as before)
+    def score(c: Dict[str, Any]):
+        kw_rank = min([i for i, kw in enumerate(TARGET_TITLE_KEYWORDS) if kw in c["title"]] or [999])
+        t_rank = min([i for i, kw in enumerate(TARGET_TIMERANGE_KEYWORDS) if kw in c["time"]] or [999])
+        ratio = (c["taken"] / c["total"]) if c["total"] else 1.0
+        return (kw_rank, t_rank, ratio)
+
+    candidates.sort(key=score)
+    return candidates[0]
 
 
 def norm_url(href: str) -> str:
