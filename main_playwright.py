@@ -174,20 +174,20 @@ async def _click_first_selector(page, selectors: Iterable[str], timeout: int) ->
             if sel == "#do_order":
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await page.wait_for_function(
-                    (
-                        "selector => {"
-                        "  const el = document.querySelector(selector);"
-                        "  if (!el) return false;"
-                        "  const style = window.getComputedStyle(el);"
-                        "  if (!style) return false;"
-                        "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
-                        "  const disabled = el.hasAttribute('disabled')"
-                        "    || el.getAttribute('aria-disabled') === 'true'"
-                        "    || el.classList.contains('disabled');"
-                        "  return !hidden && !disabled;"
-                        "}"
-                    ),
-                    sel,
+                    """
+                    selector => {
+                      const el = document.querySelector(selector);
+                      if (!el) return false;
+                      const style = window.getComputedStyle(el);
+                      if (!style) return false;
+                      const hidden = style.visibility === 'hidden' || style.display === 'none';
+                      const disabled = el.hasAttribute('disabled')
+                        || el.getAttribute('aria-disabled') === 'true'
+                        || el.classList.contains('disabled');
+                      return !hidden && !disabled;
+                    }
+                    """,
+                    arg=sel,
                     timeout=timeout,
                 )
             await page.wait_for_selector(sel, timeout=timeout)
@@ -279,34 +279,34 @@ async def book_with_playwright(course_id: str, raw_cookie: str, show: bool = Fal
                     timeout=15000,
                 ) as resp_info:
                     primary_selector = submit_selectors[0]
-                    dlg_task = asyncio.create_task(page.wait_for_event("dialog"))
                     if primary_selector == "#do_order":
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         await page.wait_for_function(
-                            (
-                                "selector => {"
-                                "  const el = document.querySelector(selector);"
-                                "  if (!el) return false;"
-                                "  const style = window.getComputedStyle(el);"
-                                "  if (!style) return false;"
-                                "  const hidden = style.visibility === 'hidden' || style.display === 'none';"
-                                "  const disabled = el.hasAttribute('disabled')"
-                                "    || el.getAttribute('aria-disabled') === 'true'"
-                                "    || el.classList.contains('disabled');"
-                                "  return !hidden && !disabled;"
-                                "}"
-                            ),
-                            primary_selector,
+                            """
+                            selector => {
+                              const el = document.querySelector(selector);
+                              if (!el) return false;
+                              const style = window.getComputedStyle(el);
+                              if (!style) return false;
+                              const hidden = style.visibility === 'hidden' || style.display === 'none';
+                              const disabled = el.hasAttribute('disabled')
+                                || el.getAttribute('aria-disabled') === 'true'
+                                || el.classList.contains('disabled');
+                              return !hidden && !disabled;
+                            }
+                            """,
+                            arg=primary_selector,
                             timeout=10000,
                         )
                     await page.wait_for_selector(primary_selector, timeout=10000)
-                    loc = page.locator(primary_selector)
-                    await loc.scroll_into_view_if_needed()
-                    try:
-                        await loc.click()
-                    except Exception:
-                        await loc.click(force=True)
-                    dlg = await dlg_task
+                    async with page.expect_dialog() as dlg_info:
+                        loc = page.locator(primary_selector)
+                        await loc.scroll_into_view_if_needed()
+                        try:
+                            await loc.click()
+                        except Exception:
+                            await loc.click(force=True)
+                    dlg = await dlg_info.value
                     await dlg.accept()
 
                 resp = await resp_info.value
