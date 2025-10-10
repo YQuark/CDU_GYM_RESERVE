@@ -35,7 +35,10 @@ class VisualApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("styd.cn 自动预约 - 可视化面板")
-        self.root.geometry("900x640")
+        self.root.geometry("960x680")
+        self.root.minsize(860, 600)
+
+        self._init_styles()
 
         self.log_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self._is_running = False
@@ -46,12 +49,100 @@ class VisualApp:
     # ------------------------------------------------------------------
     # UI construction helpers
     # ------------------------------------------------------------------
-    def _build_widgets(self) -> None:
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    def _init_styles(self) -> None:
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
 
-        self.form_frame = ttk.Frame(notebook)
-        self.log_frame = ttk.Frame(notebook)
+        self.root.configure(bg="#f5f7fb")
+        self.root.option_add("*Font", "Microsoft YaHei UI 10")
+
+        style.configure(
+            "TNotebook",
+            background="#f5f7fb",
+            borderwidth=0,
+            padding=6,
+        )
+        style.configure(
+            "TNotebook.Tab",
+            padding=(16, 10),
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", "#3f8cff")],
+            foreground=[("selected", "white"), ("!selected", "#4a5568")],
+        )
+
+        style.configure(
+            "Card.TFrame",
+            background="white",
+            relief="flat",
+        )
+        style.configure(
+            "CardHeading.TLabel",
+            font=("Microsoft YaHei UI", 14, "bold"),
+            foreground="#1a202c",
+            background="white",
+        )
+        style.configure(
+            "Section.TLabel",
+            font=("Microsoft YaHei UI", 10),
+            foreground="#2d3748",
+            background="white",
+        )
+        style.configure(
+            "Card.TCheckbutton",
+            background="white",
+            foreground="#2d3748",
+            font=("Microsoft YaHei UI", 10),
+        )
+        style.configure(
+            "Accent.TButton",
+            font=("Microsoft YaHei UI", 11, "bold"),
+            foreground="white",
+            background="#3f8cff",
+            padding=(16, 10),
+            borderwidth=0,
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("pressed", "#2667d1"), ("active", "#2667d1")],
+        )
+        style.configure(
+            "TEntry",
+            fieldbackground="#f7fafc",
+            bordercolor="#cbd5f5",
+            lightcolor="#93c5fd",
+            darkcolor="#93c5fd",
+            relief="flat",
+            padding=6,
+        )
+
+    def _build_widgets(self) -> None:
+        wrapper = ttk.Frame(self.root, style="Card.TFrame")
+        wrapper.pack(fill=tk.BOTH, expand=True, padx=18, pady=18)
+
+        header = ttk.Frame(wrapper, style="Card.TFrame")
+        header.pack(fill=tk.X, pady=(0, 16))
+        ttk.Label(
+            header,
+            text="styd.cn 自动预约",
+            style="CardHeading.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            header,
+            text="填写账号信息与课程筛选条件后即可一键执行预约",
+            style="Section.TLabel",
+        ).pack(anchor="w", pady=(6, 0))
+
+        notebook = ttk.Notebook(wrapper)
+        notebook.pack(fill=tk.BOTH, expand=True)
+
+        self.form_frame = ttk.Frame(notebook, style="Card.TFrame")
+        self.log_frame = ttk.Frame(notebook, style="Card.TFrame")
         notebook.add(self.form_frame, text="配置")
         notebook.add(self.log_frame, text="日志")
 
@@ -59,9 +150,9 @@ class VisualApp:
         self._build_log(self.log_frame)
 
     def _build_form(self, parent: ttk.Frame) -> None:
-        canvas = tk.Canvas(parent, borderwidth=0)
+        canvas = tk.Canvas(parent, borderwidth=0, background="white", highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        self.form_container = ttk.Frame(canvas)
+        self.form_container = ttk.Frame(canvas, style="Card.TFrame")
 
         self.form_container.bind(
             "<Configure>",
@@ -75,22 +166,37 @@ class VisualApp:
 
         row = 0
         # Account
-        ttk.Label(self.form_container, text="账号昵称").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(self.form_container, text="账号昵称", style="Section.TLabel").grid(
+            row=row, column=0, sticky="w", pady=6
+        )
         self.account_name_var = tk.StringVar(value="QL-Account")
         ttk.Entry(self.form_container, textvariable=self.account_name_var, width=50).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="Cookie").grid(row=row, column=0, sticky="nw", pady=4)
-        self.cookie_text = tk.Text(self.form_container, height=4, width=60)
-        self.cookie_text.grid(row=row, column=1, sticky="we", pady=4)
+        ttk.Label(self.form_container, text="Cookie", style="Section.TLabel").grid(
+            row=row, column=0, sticky="nw", pady=6
+        )
+        self.cookie_text = tk.Text(
+            self.form_container,
+            height=4,
+            width=60,
+            font=("Microsoft YaHei UI", 10),
+            relief="solid",
+            borderwidth=1,
+            highlightthickness=0,
+            background="#f7fafc",
+        )
+        self.cookie_text.grid(row=row, column=1, sticky="we", pady=6)
         row += 1
 
-        ttk.Label(self.form_container, text="优先会员卡关键字").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="优先会员卡关键字", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.preferred_cards_var = tk.StringVar()
         ttk.Entry(self.form_container, textvariable=self.preferred_cards_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
@@ -99,42 +205,56 @@ class VisualApp:
         )
         row += 1
 
-        ttk.Label(self.form_container, text="课程标题关键字 (逗号/竖线/换行分隔)").grid(
-            row=row, column=0, sticky="w", pady=4
+        ttk.Label(
+            self.form_container,
+            text="课程标题关键字 (逗号/竖线/换行分隔)",
+            style="Section.TLabel",
+        ).grid(
+            row=row, column=0, sticky="w", pady=6
         )
         self.title_keywords_var = tk.StringVar()
         ttk.Entry(self.form_container, textvariable=self.title_keywords_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="时段关键字").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="时段关键字", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.time_keywords_var = tk.StringVar()
         ttk.Entry(self.form_container, textvariable=self.time_keywords_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="预约日期 (支持 2024-01-01 或区间 2024-01-01~2024-01-05)").grid(
-            row=row, column=0, sticky="w", pady=4
+        ttk.Label(
+            self.form_container,
+            text="预约日期 (支持 2024-01-01 或区间 2024-01-01~2024-01-05)",
+            style="Section.TLabel",
+        ).grid(
+            row=row, column=0, sticky="w", pady=6
         )
         self.date_var = tk.StringVar()
         ttk.Entry(self.form_container, textvariable=self.date_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="最大重试次数").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="最大重试次数", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.max_attempts_var = tk.StringVar(value="1")
         ttk.Entry(self.form_container, textvariable=self.max_attempts_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="重试间隔 (ms, 例如 120,300)").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="重试间隔 (ms, 例如 120,300)", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.delay_var = tk.StringVar(value="120,300")
         ttk.Entry(self.form_container, textvariable=self.delay_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
@@ -143,7 +263,8 @@ class VisualApp:
             self.form_container,
             text="严格匹配关键字",
             variable=self.strict_match_var,
-        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=4)
+            style="Card.TCheckbutton",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=6)
         row += 1
 
         self.allow_fallback_var = tk.BooleanVar(value=True)
@@ -151,7 +272,8 @@ class VisualApp:
             self.form_container,
             text="匹配失败时允许任意可约课程",
             variable=self.allow_fallback_var,
-        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=4)
+            style="Card.TCheckbutton",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=6)
         row += 1
 
         ttk.Separator(self.form_container, orient=tk.HORIZONTAL).grid(
@@ -159,24 +281,30 @@ class VisualApp:
         )
         row += 1
 
-        ttk.Label(self.form_container, text="shop_id").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(self.form_container, text="shop_id", style="Section.TLabel").grid(
+            row=row, column=0, sticky="w", pady=6
+        )
         self.shop_id_var = tk.StringVar(value=DEFAULT_SHOP_ID)
         ttk.Entry(self.form_container, textvariable=self.shop_id_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="全局超时 (ms，可选)").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="全局超时 (ms，可选)", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.global_timeout_var = tk.StringVar()
         ttk.Entry(self.form_container, textvariable=self.global_timeout_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
-        ttk.Label(self.form_container, text="并发数").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Label(
+            self.form_container, text="并发数", style="Section.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=6)
         self.concurrency_var = tk.StringVar(value="1")
         ttk.Entry(self.form_container, textvariable=self.concurrency_var).grid(
-            row=row, column=1, sticky="we", pady=4
+            row=row, column=1, sticky="we", pady=6
         )
         row += 1
 
@@ -191,14 +319,27 @@ class VisualApp:
         ttk.Label(
             self.form_container,
             text="提示：关键字可使用逗号、竖线或换行分隔；多日期会自动拆分为多个任务。",
-            foreground="#555",
-            wraplength=480,
+            style="Section.TLabel",
+            wraplength=520,
             justify="left",
-        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=8)
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=10)
         row += 1
 
-        self.run_button = ttk.Button(self.form_container, text="执行预约", command=self._on_run_clicked)
-        self.run_button.grid(row=row, column=0, columnspan=2, pady=10)
+        self.run_button = ttk.Button(
+            self.form_container,
+            text="执行预约",
+            command=self._on_run_clicked,
+            style="Accent.TButton",
+        )
+        self.run_button.grid(row=row, column=0, columnspan=2, pady=16, sticky="we")
+
+        button_shadow = tk.Frame(
+            self.form_container,
+            background="#2667d1",
+            height=2,
+        )
+        button_shadow.grid(row=row + 1, column=0, columnspan=2, sticky="we", pady=(0, 12))
+        row += 2
 
         for child in self.form_container.winfo_children():
             if isinstance(child, (ttk.Entry, tk.Text)):
@@ -206,8 +347,20 @@ class VisualApp:
         self.form_container.columnconfigure(1, weight=1)
 
     def _build_log(self, parent: ttk.Frame) -> None:
-        self.log_text = scrolledtext.ScrolledText(parent, state=tk.DISABLED)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        container = ttk.Frame(parent, style="Card.TFrame")
+        container.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        self.log_text = scrolledtext.ScrolledText(
+            container,
+            state=tk.DISABLED,
+            font=("Cascadia Code", 10),
+            background="#1f2933",
+            foreground="#f7fafc",
+            insertbackground="#f7fafc",
+            relief="flat",
+            borderwidth=0,
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
     # ------------------------------------------------------------------
     # Utility helpers
