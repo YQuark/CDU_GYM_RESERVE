@@ -89,24 +89,36 @@ def _build_simple_env(env: Mapping[str, str]) -> Dict[str, str]:
     delay_value = env.get("STYD_DELAY_MS")
 
     task: MutableMapping[str, object] = {}
+    has_keywords = False
     if title_keywords:
         task["title_keywords"] = title_keywords
+        has_keywords = True
     if time_keywords:
         task["time_keywords"] = time_keywords
-    if date_value:
-        task["date"] = date_value
-    if strict_match is not None:
-        task["strict_match"] = _parse_bool(strict_match, True)
-    if allow_fallback is not None:
-        task["allow_fallback"] = _parse_bool(allow_fallback, True)
-    if max_attempts is not None and max_attempts != "":
-        attempts = _parse_int(max_attempts)
-        if attempts is not None:
-            task["max_attempts"] = max(1, attempts)
-    if delay_value:
-        delay = _parse_delay(delay_value)
-        if delay:
-            task["delay_ms"] = list(delay)
+        has_keywords = True
+
+    if not has_keywords:
+        if env.get("TASKS"):
+            task.clear()
+        else:
+            raise ValueError(
+                "至少需要配置 STYD_TITLE_KEYWORDS 或 STYD_TIME_KEYWORDS 才能生成任务。"
+            )
+    else:
+        if date_value:
+            task["date"] = date_value
+        if strict_match is not None:
+            task["strict_match"] = _parse_bool(strict_match, True)
+        if allow_fallback is not None:
+            task["allow_fallback"] = _parse_bool(allow_fallback, True)
+        if max_attempts is not None and max_attempts != "":
+            attempts = _parse_int(max_attempts)
+            if attempts is not None:
+                task["max_attempts"] = max(1, attempts)
+        if delay_value:
+            delay = _parse_delay(delay_value)
+            if delay:
+                task["delay_ms"] = list(delay)
 
     accounts_payload: List[MutableMapping[str, object]] = [
         {"name": account_name, "cookie": cookie}
