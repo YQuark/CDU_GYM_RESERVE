@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections import ChainMap
+from datetime import date as date_cls, datetime, timedelta
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple
 
 from config import AppConfig, load_app_config
@@ -65,6 +66,64 @@ def _parse_delay(value: Optional[str]) -> Optional[Tuple[int, int]]:
     raise ValueError("delay_ms 需要形如 '120,300' 的两个整数")
 
 
+def _parse_date_list(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    raw = value.strip()
+    if not raw:
+        return []
+
+    def _parse_single(date_str: str) -> date_cls:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError as exc:  # pragma: no cover - defensive branch
+            raise ValueError(f"无法解析日期: {date_str}") from exc
+
+    def _expand(token: str) -> List[date_cls]:
+        token = token.strip()
+        if not token:
+            return []
+        if "~" in token:
+            start_raw, end_raw = [part.strip() for part in token.split("~", 1)]
+            if not start_raw or not end_raw:
+                raise ValueError(f"日期范围格式错误: {token}")
+            start = _parse_single(start_raw)
+            end = _parse_single(end_raw)
+            if end < start:
+                start, end = end, start
+            days: List[date_cls] = []
+            current = start
+            while current <= end:
+                days.append(current)
+                current += timedelta(days=1)
+            return days
+        return [_parse_single(token)]
+
+    tokens: List[str]
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive branch
+            raise ValueError(f"无法解析日期列表: {exc}") from exc
+        if isinstance(parsed, Iterable) and not isinstance(parsed, (str, bytes)):
+            tokens = [str(item) for item in parsed if str(item).strip()]
+        else:
+            raise ValueError("STYD_DATE 需要为字符串或字符串数组")
+    else:
+        tokens = [raw]
+        for sep in ("|", ",", ";", "\n"):
+            if sep in raw:
+                tokens = [part for part in raw.split(sep) if part.strip()]
+                break
+
+    collected: Dict[str, date_cls] = {}
+    for token in tokens:
+        for item in _expand(token):
+            collected[item.isoformat()] = item
+    ordered = sorted(collected.items(), key=lambda kv: kv[1])
+    return [iso for iso, _ in ordered]
+
+
 def _build_simple_env(env: Mapping[str, str]) -> Dict[str, str]:
     if env.get("ACCOUNTS"):
         return {}
@@ -82,43 +141,44 @@ def _build_simple_env(env: Mapping[str, str]) -> Dict[str, str]:
 
     title_keywords = _parse_keywords(env.get("STYD_TITLE_KEYWORDS"))
     time_keywords = _parse_keywords(env.get("STYD_TIME_KEYWORDS"))
-    date_value = env.get("STYD_DATE") or None
+    date_values = _parse_date_list(env.get("STYD_DATE"))
+    date_value = date_values[0] if len(date_values) == 1 else None
     strict_match = env.get("STYD_STRICT_MATCH")
     allow_fallback = env.get("STYD_ALLOW_FALLBACK")
     max_attempts = env.get("STYD_MAX_ATTEMPTS")
     delay_value = env.get("STYD_DELAY_MS")
 
-    task: MutableMapping[str, object] = {}
+    task_base: MutableMapping[str, object] = {}
     has_keywords = False
     if title_keywords:
-        task["title_keywords"] = title_keywords
+        task_base["title_keywords"] = title_keywords
         has_keywords = True
     if time_keywords:
-        task["time_keywords"] = time_keywords
+        task_base["time_keywords"] = time_keywords
         has_keywords = True
 
     if not has_keywords:
         if env.get("TASKS"):
-            task.clear()
+            task_base.clear()
         else:
             raise ValueError(
                 "至少需要配置 STYD_TITLE_KEYWORDS 或 STYD_TIME_KEYWORDS 才能生成任务。"
             )
     else:
         if date_value:
-            task["date"] = date_value
+            task_base["date"] = date_value
         if strict_match is not None:
-            task["strict_match"] = _parse_bool(strict_match, True)
+            task_base["strict_match"] = _parse_bool(strict_match, True)
         if allow_fallback is not None:
-            task["allow_fallback"] = _parse_bool(allow_fallback, True)
+            task_base["allow_fallback"] = _parse_bool(allow_fallback, True)
         if max_attempts is not None and max_attempts != "":
             attempts = _parse_int(max_attempts)
             if attempts is not None:
-                task["max_attempts"] = max(1, attempts)
+                task_base["max_attempts"] = max(1, attempts)
         if delay_value:
             delay = _parse_delay(delay_value)
             if delay:
-                task["delay_ms"] = list(delay)
+                task_base["delay_ms"] = list(delay)
 
     accounts_payload: List[MutableMapping[str, object]] = [
         {"name": account_name, "cookie": cookie}
@@ -127,8 +187,15 @@ def _build_simple_env(env: Mapping[str, str]) -> Dict[str, str]:
         accounts_payload[0]["preferred_cards"] = preferred_cards
 
     tasks_payload: List[MutableMapping[str, object]]
-    if task:
-        tasks_payload = [task]
+    if task_base:
+        if date_values and len(date_values) > 1:
+            tasks_payload = []
+            for date in date_values:
+                task_copy = dict(task_base)
+                task_copy["date"] = date
+                tasks_payload.append(task_copy)
+        else:
+            tasks_payload = [task_base]
     else:
         tasks_payload = []
 
