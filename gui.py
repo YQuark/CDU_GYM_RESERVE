@@ -9,6 +9,8 @@ import queue
 import sys
 # >>> changed
 import threading
+# >>> added
+from pathlib import Path
 # >>> changed
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -52,7 +54,8 @@ _THEME_MAP: Dict[str, Dict[str, str]] = {
 
 # >>> added
 def _load_qss_template() -> str:
-    with open("modern.qss", "r", encoding="utf-8") as fh:
+    theme_path = Path(__file__).with_name("modern.qss")
+    with theme_path.open("r", encoding="utf-8") as fh:
         return fh.read()
 
 
