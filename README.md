@@ -122,5 +122,7 @@ TASKS=[
 2. 运行命令 `python gui.py` 即可打开界面。
 3. 在界面中填写 Cookie、关键字、日期等信息，点击「执行预约」即可在日志页查看运行情况。
 
+> 若在 Windows 上运行 GUI 时遇到 `ImportError: DLL load failed while importing QtCore` 等 PyQt5 相关报错，可参考[排查指引](docs/windows-pyqt5-troubleshooting.md) 逐步解决。
+
 > 面板依旧复用脚本核心逻辑，执行效果与青龙环境保持一致。关键字、日期字段支持与环境变量相同的写法（逗号/竖线/换行或 JSON 数组、日期范围等）。
 
