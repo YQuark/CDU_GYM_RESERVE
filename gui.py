@@ -87,12 +87,12 @@ class VisualApp(tk.Tk):
     # UI construction helpers
     # ------------------------------------------------------------------
     def _build_styles(self) -> None:
-        self.option_add("*Font", "Microsoft YaHei UI 10")
-        self.option_add("*TCombobox*Listbox.font", "Microsoft YaHei UI 10")
-        self.style.configure("Title.TLabel", font=("Microsoft YaHei UI", 20, "bold"))
-        self.style.configure("Subtitle.TLabel", font=("Microsoft YaHei UI", 12))
-        self.style.configure("FormLabel.TLabel", font=("Microsoft YaHei UI", 10))
-        self.style.configure("Hint.TLabel", font=("Microsoft YaHei UI", 9))
+        self.option_add("*Font", "苹方-简 10")
+        self.option_add("*TCombobox*Listbox.font", "苹方-简 10")
+        self.style.configure("Title.TLabel", font=("苹方-简", 20, "bold"))
+        self.style.configure("Subtitle.TLabel", font=("苹方-简", 12))
+        self.style.configure("FormLabel.TLabel", font=("苹方-简", 10))
+        self.style.configure("Hint.TLabel", font=("苹方-简", 9))
         self.style.configure("Primary.TButton", padding=(16, 10))
         self.style.configure("Chip.TLabel", padding=(14, 6))
         self.style.configure("Card.TFrame", borderwidth=1, relief="solid")

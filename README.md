@@ -6,7 +6,7 @@
 
 ## 🚀 青龙面板三步部署
 
-1. **拉库**：`ql repo https://github.com/<your-org>/CDU_GYM_RESERVE.git "" "" ""`
+1. **拉库**：`ql repo https://github.com/YQuark/CDU_GYM_RESERVE.git "" "" ""`
 2. **新建定时任务**：命令填写 `python3 main.py`（建议放号前 1~2 分钟执行）。
 3. **配置环境变量**（详见下方表格）。保存后即可手动运行验证。
 
