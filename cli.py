@@ -5,6 +5,7 @@ import sys
 from typing import List, Optional, Sequence
 
 from config import AppConfig, TaskConfig, load_app_config
+from config_utils import parse_keywords
 from core import (
     RunRequest,
     create_session,
@@ -12,6 +13,7 @@ from core import (
     parse_courses_from_html,
     run_once,
 )
+from privacy import mask_identifier, sanitize_text
 from runner import TaskOverrides, run_tasks
 
 
@@ -22,12 +24,14 @@ def _parse_keywords(values: Optional[Sequence[str]]) -> List[str]:
     for value in values:
         if value is None:
             continue
-        result.append(str(value))
+        parsed = parse_keywords(str(value))
+        if parsed:
+            result.extend(parsed)
     return result
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="styd.cn 自动预约 CLI")
+    parser = argparse.ArgumentParser(description="预约任务自动化 CLI（示例数据）")
     parser.add_argument("--date", dest="compat_date")
     parser.add_argument("--shop", dest="compat_shop")
     parser.add_argument("--show", dest="compat_show", action="store_true")
@@ -153,7 +157,8 @@ def _handle_reserve(args: argparse.Namespace) -> int:
         print("[E] 未提供 Cookie，请通过 --cookie 或 ACCOUNTS 配置。")
         return 1
     shop_id = args.shop or config.shop_id
-    print(f"[配置] 使用 shop_id = {shop_id}")
+    masked_shop = mask_identifier(shop_id, placeholder="SHOP")
+    print(sanitize_text(f"[配置] 使用 shop_id = {masked_shop}"))
     titles = _parse_keywords(getattr(args, "title", None))
     times = _parse_keywords(getattr(args, "time", None))
     base_task = _resolve_keywords_from_config(config)
@@ -179,16 +184,22 @@ def _handle_reserve(args: argparse.Namespace) -> int:
     )
     outcome = run_once(run_request)
     status = "SUCCESS" if outcome.success else "FAIL"
-    print(f"[reserve] 状态={status} 原因={outcome.reason} HTTP={outcome.http_status} code={outcome.code}")
+    print(
+        sanitize_text(
+            f"[reserve] 状态={status} 原因={outcome.reason} HTTP={outcome.http_status} code={outcome.code}"
+        )
+    )
     if outcome.final_url:
-        print(f"[reserve] 最终URL: {outcome.final_url}")
+        print(sanitize_text(f"[reserve] 最终URL: {outcome.final_url}"))
     if outcome.evidence:
-        print(f"[reserve] 证据: {outcome.evidence}")
+        print(sanitize_text(f"[reserve] 证据: {outcome.evidence}"))
     if outcome.course:
         print(
-            f"[reserve] 课程: {outcome.course.get('title')} | {outcome.course.get('time')} | {outcome.course.get('href')}"
+            sanitize_text(
+                f"[reserve] 课程: {outcome.course.get('title')} | {outcome.course.get('time')} | {outcome.course.get('href')}"
+            )
         )
-    print(f"[reserve] 消息: {outcome.msg}")
+    print(sanitize_text(f"[reserve] 消息: {outcome.msg}"))
     return 0 if outcome.success else 1
 
 
@@ -202,7 +213,8 @@ def _handle_show(args: argparse.Namespace) -> int:
         print("[E] 未提供 Cookie，请通过 --cookie 或 ACCOUNTS 配置。")
         return 1
     shop_id = args.shop or config.shop_id
-    print(f"[配置] 使用 shop_id = {shop_id}")
+    masked_shop = mask_identifier(shop_id, placeholder="SHOP")
+    print(sanitize_text(f"[配置] 使用 shop_id = {masked_shop}"))
     session = create_session(cookie)
     try:
         data = fetch_search(session, date=args.date, shop_id=shop_id, tp="1")
@@ -216,7 +228,9 @@ def _handle_show(args: argparse.Namespace) -> int:
         return 1
     for course in courses:
         print(
-            f"- {course['title']} | {course['time']} | {course['taken']}/{course['total']} | {course['status']} | {course['href']}"
+            sanitize_text(
+                f"- {course['title']} | {course['time']} | {course['taken']}/{course['total']} | {course['status']} | {course['href']}"
+            )
         )
     return 0
 

@@ -4,12 +4,13 @@ import argparse
 
 from config import load_app_config
 from core import RunRequest, run_once
+from privacy import mask_identifier, sanitize_text
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="styd.cn 自动预约（requests 直发版）")
+    parser = argparse.ArgumentParser(description="预约任务直发脚本（示例环境）")
     parser.add_argument("--date", required=True, help="目标日期，如 2025-10-13")
-    parser.add_argument("--shop", help="shop_id，例如 612773420")
+    parser.add_argument("--shop", help="shop_id，例如 SHOP_0001")
     parser.add_argument("--title", action="append", help="标题关键字，可多次传入")
     parser.add_argument("--time", action="append", help="时间关键字，可多次传入")
     parser.add_argument("--cookie", help="覆盖默认账号 Cookie")
@@ -50,12 +51,15 @@ def main() -> None:
         allow_fallback=allow_fallback,
         preferred_card_keywords=preferred_cards,
     )
-    print(f"[配置] 使用 shop_id = {request.shop_id}")
+    masked_shop = mask_identifier(request.shop_id, placeholder="SHOP")
+    print(sanitize_text(f"[配置] 使用 shop_id = {masked_shop}"))
     outcome = run_once(request)
     if outcome.success:
         print("[结果] 成功")
     else:
-        print(f"[结果] 失败：{outcome.reason} -> {outcome.msg}")
+        reason = sanitize_text(outcome.reason)
+        msg = sanitize_text(outcome.msg)
+        print(f"[结果] 失败：{reason} -> {msg}")
 
 
 if __name__ == "__main__":

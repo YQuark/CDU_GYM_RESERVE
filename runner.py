@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import json
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,6 +8,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from config import AccountConfig, AppConfig, TaskConfig
 from core import RunOutcome, RunRequest, run_once
+from privacy import mask_identifier, sanitize_text, sanitise_and_dump_json
 
 
 @dataclass
@@ -174,7 +173,8 @@ def run_tasks(
 ) -> List[TaskExecutionRecord]:
     overrides = overrides or TaskOverrides()
     shop_id = shop_id_override or config.shop_id
-    print(f"[配置] 使用 shop_id = {shop_id}")
+    masked_shop = mask_identifier(shop_id, placeholder="SHOP")
+    print(sanitize_text(f"[配置] 使用 shop_id = {masked_shop}"))
     specs = _build_runtime_specs(config, overrides)
     if not specs:
         return []
@@ -189,7 +189,8 @@ def run_tasks(
         by_account.setdefault(spec.account.name, []).append(spec)
 
     for account_name, account_specs in by_account.items():
-        print(f"\n[账号] {account_name} - 待执行任务 {len(account_specs)} 个")
+        masked_account = mask_identifier(account_name, placeholder="ACCOUNT")
+        print(sanitize_text(f"\n[账号] {masked_account} - 待执行任务 {len(account_specs)} 个"))
         concurrency = max(1, config.concurrency)
         account_records: List[TaskExecutionRecord] = []
         if concurrency <= 1 or len(account_specs) == 1:
@@ -217,24 +218,33 @@ def _log_result(record: TaskExecutionRecord, log_json: bool) -> None:
     outcome = record.outcome
     course_info = outcome.course or {}
     status = "SUCCESS" if outcome.success else "FAIL"
+    account_repr = mask_identifier(spec.account.name, placeholder="ACCOUNT")
+    title_repr = [sanitize_text(item) for item in spec.title_keywords]
+    time_repr = [sanitize_text(item) for item in spec.time_keywords]
     print(
-        f"[任务][{spec.account.name}] {spec.date} | 标题关键字={spec.title_keywords} | 时段关键字={spec.time_keywords}"
+        sanitize_text(
+            f"[任务][{account_repr}] {spec.date} | 标题关键字={title_repr} | 时段关键字={time_repr}"
+        )
     )
     print(
-        f"  -> 结果: {status} | 原因: {outcome.reason} | HTTP: {outcome.http_status} | code: {outcome.code} | msg: {outcome.msg}"
+        sanitize_text(
+            f"  -> 结果: {status} | 原因: {outcome.reason} | HTTP: {outcome.http_status} | code: {outcome.code} | msg: {outcome.msg}"
+        )
     )
     if outcome.final_url:
-        print(f"  -> 最终URL: {outcome.final_url}")
+        print(sanitize_text(f"  -> 最终URL: {outcome.final_url}"))
     if outcome.evidence:
-        print(f"  -> 证据: {outcome.evidence}")
+        print(sanitize_text(f"  -> 证据: {outcome.evidence}"))
     if course_info:
         print(
-            f"  -> 课程: {course_info.get('title')} | {course_info.get('time')} | 链接: {course_info.get('href')}"
+            sanitize_text(
+                f"  -> 课程: {course_info.get('title')} | {course_info.get('time')} | 链接: {course_info.get('href')}"
+            )
         )
     if log_json:
         payload = {
             "ts": datetime.now().isoformat(),
-            "account": spec.account.name,
+            "account": account_repr,
             "task": {
                 "date": spec.date,
                 "title": list(spec.title_keywords),
@@ -248,4 +258,4 @@ def _log_result(record: TaskExecutionRecord, log_json: bool) -> None:
             "req_id": outcome.req_id,
             "final_url": outcome.final_url,
         }
-        print(json.dumps(payload, ensure_ascii=False))
+        print(sanitise_and_dump_json(payload))

@@ -192,7 +192,7 @@ def load_app_config(
     env_path: str = ".env",
 ) -> AppConfig:
     defaults: Dict[str, Any] = {
-        "SHOP_ID": "612773420",
+        "SHOP_ID": "SHOP_0001",
         "ACCOUNTS": [],
         "TASKS": [],
         "DATE_RULE": None,

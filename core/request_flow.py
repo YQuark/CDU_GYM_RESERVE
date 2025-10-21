@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 import urllib.parse as urlparse
@@ -9,10 +10,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import requests
 from bs4 import BeautifulSoup
 
-BASE = "https://www.styd.cn"
-SPACE = "e74abd6e"
-SEARCH_API = f"{BASE}/m/{SPACE}/default/search"
-ORDER_CONFIRM = f"{BASE}/m/{SPACE}/course/order_confirm"
+API_BASE = os.environ.get("API_BASE_URL", "https://api.example.com").rstrip("/")
+SPACE = os.environ.get("API_NAMESPACE", "demo_space")
+SEARCH_API = f"{API_BASE}/m/{SPACE}/default/search"
+ORDER_CONFIRM = f"{API_BASE}/m/{SPACE}/course/order_confirm"
+API_HOST = urlparse.urlparse(API_BASE).hostname or ""
 
 MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
@@ -20,9 +22,9 @@ MOBILE_UA = (
     "Mobile/15E148 Safari/604.1 Edg/140.0.0.0"
 )
 
-DEFAULT_MEMBER_CARD_ID = "13413260" #swim id=8566400&member_card_id=13413533
-DEFAULT_CARD_CAT_ID = "8566333" #gym id=8566333&member_card_id=13413260
-DEFAULT_COURSE_ID = "8225475" #82358645
+DEFAULT_MEMBER_CARD_ID = os.environ.get("DEFAULT_MEMBER_CARD_ID", "CARD_PLACEHOLDER")
+DEFAULT_CARD_CAT_ID = os.environ.get("DEFAULT_CARD_CAT_ID", "CAT_PLACEHOLDER")
+DEFAULT_COURSE_ID = os.environ.get("DEFAULT_COURSE_ID", "COURSE_PLACEHOLDER")
 
 _AVAILABLE_STATUSES = {"available", "hot", "queue"}
 _BUSY_KEYWORDS = ("系统繁忙", "稍后再试", "操作频繁", "频繁")
@@ -79,7 +81,7 @@ def create_session(cookie: str) -> requests.Session:
             "User-Agent": MOBILE_UA,
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{BASE}/m/{SPACE}/default/index?type=1",
+            "Referer": f"{API_BASE}/m/{SPACE}/default/index?type=1",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
     )
@@ -88,7 +90,10 @@ def create_session(cookie: str) -> requests.Session:
         if "=" not in kv:
             continue
         k, v = kv.split("=", 1)
-        sess.cookies.set(k, v, domain="www.styd.cn")
+        if API_HOST:
+            sess.cookies.set(k, v, domain=API_HOST)
+        else:
+            sess.cookies.set(k, v)
     return sess
 
 
@@ -203,8 +208,8 @@ def norm_url(href: str) -> str:
     if href.startswith("http"):
         return href
     if href.startswith("/"):
-        return BASE + href
-    return BASE + "/" + href
+        return API_BASE.rstrip("/") + href
+    return API_BASE.rstrip("/") + "/" + href
 
 
 def get_html_with_browser_headers(session: requests.Session, url: str, referer: str) -> requests.Response:
@@ -247,11 +252,11 @@ def extract_hidden_fields(order_html: str) -> Dict[str, str]:
 
 
 def fetch_cards_from_user_card(session: requests.Session) -> List[Dict[str, str]]:
-    url = f"{BASE}/m/{SPACE}/user/card"
+    url = f"{API_BASE}/m/{SPACE}/user/card"
     response = get_html_with_browser_headers(
         session,
         url,
-        referer=f"{BASE}/m/{SPACE}/default/index?type=1",
+        referer=f"{API_BASE}/m/{SPACE}/default/index?type=1",
     )
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "lxml")
@@ -297,7 +302,7 @@ def post_order_confirm(session: requests.Session, referer: str, payload: Dict[st
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Origin": BASE,
+        "Origin": API_BASE,
         "Referer": referer,
     }
     last_response: Optional[requests.Response] = None
@@ -408,7 +413,7 @@ def run_once(request: RunRequest) -> RunOutcome:
     match = re.search(r"[?&]id=(\d+)", order_url)
     class_id = match.group(1) if match else ""
 
-    referer = f"{BASE}/m/{SPACE}/default/index?type=1"
+    referer = f"{API_BASE}/m/{SPACE}/default/index?type=1"
     order_response = get_html_with_browser_headers(session, order_url, referer)
     final_order_url = order_response.url or order_url
     if order_response.status_code != 200:
