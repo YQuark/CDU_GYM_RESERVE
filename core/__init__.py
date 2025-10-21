@@ -1,7 +1,7 @@
 """Core booking flow utilities for CDU_GYM_RESERVE."""
 
 from .request_flow import (
-    BASE,
+    API_BASE,
     SPACE,
     SEARCH_API,
     ORDER_CONFIRM,
@@ -24,7 +24,7 @@ from .request_flow import (
 )
 
 __all__ = [
-    "BASE",
+    "API_BASE",
     "SPACE",
     "SEARCH_API",
     "ORDER_CONFIRM",
