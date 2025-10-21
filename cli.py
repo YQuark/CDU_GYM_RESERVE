@@ -5,6 +5,7 @@ import sys
 from typing import List, Optional, Sequence
 
 from config import AppConfig, TaskConfig, load_app_config
+from config_utils import parse_keywords
 from core import (
     RunRequest,
     create_session,
@@ -23,7 +24,9 @@ def _parse_keywords(values: Optional[Sequence[str]]) -> List[str]:
     for value in values:
         if value is None:
             continue
-        result.append(str(value))
+        parsed = parse_keywords(str(value))
+        if parsed:
+            result.extend(parsed)
     return result
 
 
